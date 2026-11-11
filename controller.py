@@ -1,7 +1,10 @@
+import json
 import time
 
 from AppKit import NSEvent
 from Foundation import NSObject, NSTimer
+
+from PyObjCTools import AppHelper
 
 from config import CONFIG
 from log import log, log_exc
@@ -44,7 +47,15 @@ class SessionController:
         self.image_worker = ImageProcessingWorker()
         self.image_worker.start()
         self.capturer = None
-        processor = FakeAudioProcessor() if config.fake_transcript else AudioProcessor()
+        self.speech = None
+        if config.fake_transcript:
+            processor = FakeAudioProcessor()
+            delegate.set_model_status("Speech: fake transcript (config)")
+        else:
+            from asr import CactusProcessor, SpeechModel
+
+            self.speech = SpeechModel(self._on_model_state, config)
+            processor = CactusProcessor(self.speech, config)
         self.audio_worker = AudioProcessingWorker(processor, self.on_transcript)
         self.caption = CaptionPanel()
         self.audio_worker.start()
@@ -52,6 +63,15 @@ class SessionController:
         self.transcript: list[str] = []
         self._watchdog = None
         self._timer_target = WatchdogTimerTarget.alloc().initWithCallback_(self._watchdog_tick)
+        if self.speech is not None:
+            delegate.set_model_status("Loading speech model…")
+            self.speech.start()
+
+    def _on_model_state(self, state: str, detail: str) -> None:
+        """Called on the model-loading thread."""
+        text = {"loading": "Loading speech model…", "ready": "Speech model ready",
+                "error": "Speech model unavailable"}[state]
+        AppHelper.callAfter(self.delegate.set_model_status, text)
 
     def start(self) -> None:
         if self.active:
@@ -121,13 +141,29 @@ class SessionController:
         log("session", f"stop {s.id} ({reason}): segment {s.segment} {s.ended_at - s.segment_started_at:.2f}s, "
                        f"{frames} frames ({s.frame_count} in folder), {chunks} audio chunks, folder={s.folder}")
 
-    def on_transcript(self, text: str, is_final: bool) -> None:
+    def on_transcript(self, text: str, is_final: bool, pending: str = "", words=None, session=None) -> None:
         """Text from the audio processor (main thread)."""
-        log("transcr", f"{'final' if is_final else 'partial'}: {text}")
-        self.caption.set_text(text)
-        if is_final:
+        log("transcr", f"{'final' if is_final else 'partial'}: {text}" + (f" […{pending}]" if pending else ""),
+            debug=not is_final)
+        stale = session is not None and self.session is not None and session is not self.session
+        if not is_final:
+            if not stale:
+                self.caption.set_parts(text, pending)
+            return
+        if not stale:  # don't overwrite a newer session's caption
+            self.caption.set_text(text or "No speech detected")
+        if text:
             self.transcript.append(text)
             self.delegate.last_transcript = " ".join(self.transcript)
+        s = session or self.session or self.last_session
+        if s is not None and words is not None:
+            s.words.extend(words)
+            s.transcript_text = " ".join(t for t in (s.transcript_text, text) if t)
+            try:
+                (s.folder / "transcript.json").write_text(json.dumps(
+                    {"session": s.id, "text": s.transcript_text, "words": s.words}, indent=1))
+            except Exception:
+                log_exc("transcr", "writing transcript.json failed")
 
     def shutdown(self) -> None:
         self.stop("quit")

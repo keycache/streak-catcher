@@ -1,4 +1,10 @@
 from AppKit import (
+    NSAttributedString,
+    NSFontAttributeName,
+    NSForegroundColorAttributeName,
+    NSMutableAttributedString,
+    NSMutableParagraphStyle,
+    NSParagraphStyleAttributeName,
     NSAppearance,
     NSAppearanceNameVibrantDark,
     NSBackingStoreBuffered,
@@ -115,6 +121,26 @@ class CaptionPanel:
     def set_text(self, text: str) -> None:
         if self.label is not None:
             self.label.setStringValue_(text)
+
+    def set_parts(self, committed: str, pending: str) -> None:
+        """Committed text in white, the unconfirmed tail dimmed."""
+        if self.label is None:
+            return
+        if not pending:
+            self.set_text(committed)
+            return
+        font = self.label.font()
+        out = NSMutableAttributedString.alloc().init()
+        para = NSMutableParagraphStyle.alloc().init()
+        para.setAlignment_(NSTextAlignmentCenter)
+        para.setLineBreakMode_(NSLineBreakByTruncatingHead)
+        for text, color in ((committed, NSColor.whiteColor()),
+                            ((" " if committed else "") + pending, NSColor.colorWithWhite_alpha_(1.0, 0.5))):
+            if text:
+                out.appendAttributedString_(NSAttributedString.alloc().initWithString_attributes_(
+                    text, {NSFontAttributeName: font, NSForegroundColorAttributeName: color,
+                           NSParagraphStyleAttributeName: para}))
+        self.label.setAttributedStringValue_(out)
 
     def is_visible(self) -> bool:
         return self.panel is not None and bool(self.panel.isVisible())

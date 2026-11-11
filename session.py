@@ -1,5 +1,5 @@
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -19,6 +19,8 @@ class Session:
     segment: int = 1  # 1 for a new folder, 2+ when the folder is reused
     segment_started_at: float = 0.0
     ended_at: float | None = None  # time.monotonic() when the latest segment stopped
+    transcript_text: str = ""  # final transcript across segments
+    words: list = field(default_factory=list)  # [{"word", "start", "end", "p"}], seconds since session start
 
 
 def screen_under_mouse():

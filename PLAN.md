@@ -161,13 +161,13 @@ ASR engine: **`cactus-compute`** (`cactus.agent.whistle.Whistle`), following the
 | Tail committed after audio ends | ~100 ms |
 | Output per chunk | committed `text` + `words` (`word`, `start`, `end`, `probability`; seconds from stream start), unconfirmed `pending` tail, `language`, `received`, `pass_ms` |
 
-- [ ] `uv add cactus-compute`. Set `CACTUS_TELEMETRY=0` before import (the package sends anonymous usage counts by default; config `cactus_telemetry = False`).
-- [ ] Preload at app start on a background thread: create `Whistle()` (downloads weights on first run) and run one short warm-up `transcribe`. A disabled menu line shows "Loading speech model…", then "Speech model ready", or "Speech model unavailable" with the error logged.
-- [ ] Replace the `AudioProcessor` stub with a `CactusProcessor` on the `audio-worker` thread. Per session segment it runs one `Whistle.stream()` over a generator that **regroups the recorder's 100 ms chunks into ~1 s chunks**. The generator ends on the session's `end` message, which makes cactus commit the pending tail.
-- [ ] Caption shows committed text plus the dimmed `pending` tail, updated every ~1 s. The final transcript is the committed texts joined with spaces.
-- [ ] Word times are relative to the segment's audio start. Convert them to session time (add the recorder's start offset) so gestures and words share one clock.
-- [ ] Sessions before the model is ready are allowed: chunks queue (bounded) and are streamed once the model is loaded.
-- [ ] Config: `asr_language` (`"en"`; `None` = auto-detect among en/de/fr/es/it/nl/pl), `asr_keywords` (words or phrases for keyword biasing, empty by default), `asr_chunk_s` (1.0). `stream()` holds a process-wide lock, so only one stream runs at a time; sessions are sequential, so this is fine.
+- [x] `uv add cactus-compute`. Set `CACTUS_TELEMETRY=0` before import (the package sends anonymous usage counts by default; config `cactus_telemetry = False`).
+- [x] Preload at app start on a background thread: create `Whistle()` (downloads weights on first run) and run one short warm-up `transcribe`. A disabled menu line shows "Loading speech model…", then "Speech model ready", or "Speech model unavailable" with the error logged.
+- [x] Replace the `AudioProcessor` stub with a `CactusProcessor` on the `audio-worker` thread. Per session segment it runs one `Whistle.stream()` over a generator that **regroups the recorder's 100 ms chunks into ~1 s chunks**. The generator ends on the session's `end` message, which makes cactus commit the pending tail.
+- [x] Caption shows committed text plus the dimmed `pending` tail, updated every ~1 s. The final transcript is the committed texts joined with spaces.
+- [x] Word times are relative to the segment's audio start. Convert them to session time (add the recorder's start offset) so gestures and words share one clock.
+- [x] Sessions before the model is ready are allowed: chunks queue (bounded) and are streamed once the model is loaded.
+- [x] Config: `asr_language` (`"en"`; `None` = auto-detect among en/de/fr/es/it/nl/pl), `asr_keywords` (words or phrases for keyword biasing, empty by default), `asr_chunk_s` (1.0). `stream()` holds a process-wide lock, so only one stream runs at a time; sessions are sequential, so this is fine.
 
 **Done when:** the menu line goes from loading to ready within about a second of launch (after the first-run download), speech shows live committed and pending text in the caption, and the final transcript has word timestamps on the session clock.
 
@@ -203,6 +203,7 @@ ASR engine: **`cactus-compute`** (`cactus.agent.whistle.Whistle`), following the
 - [ ] Render one **annotated overview per context**: numbered bounding boxes for every gesture in that context, drawn on that context's frame. No crops.
 - [ ] Insert `[n]` markers into the transcript at each gesture's time, using word timestamps.
 - [ ] On release, start the image job immediately and wait for the final transcript for up to `assembly_timeout_s`, with the caption showing "Transcribing…". If the model is still loading, wait up to `model_wait_timeout_s` ("Waiting for speech model…"). On timeout, use the text committed so far and log it. Transcription never blocks capture or the next session.
+- [ ] Treat very short, low-confidence finals as no speech: Whistle can hallucinate words such as "you" on near-silent input (seen in Phase 8). Thresholds go in config.
 - [ ] Edge cases: talking with no gestures sends the unique deduped frames. Gestures with no speech show a brief caption "No instructions heard" and nothing is sent.
 - [ ] `max_images` (`None` = no cap) and `truncate_keep` (`"end"` by default, keeping the most recent contexts; or `"start"`).
 - [ ] Save the assembled request (`request.json` plus the annotated images) in the session folder for debugging.

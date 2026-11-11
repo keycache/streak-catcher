@@ -11,7 +11,9 @@ def log(component: str, msg: str, *, debug: bool = False) -> None:
         return
     ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
     thread = threading.current_thread().name
-    print(f"[{ts}] [{thread:<14.14}] [{component:<7.7}] {msg}", flush=True)
+    # One write per line so lines from different threads never interleave.
+    sys.stdout.write(f"[{ts}] [{thread:<14.14}] [{component:<7.7}] {msg}\n")
+    sys.stdout.flush()
 
 
 def log_exc(component: str, msg: str) -> None:

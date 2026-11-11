@@ -120,3 +120,39 @@ Non-obvious technical gotchas hit while building Streak Catcher: surprising beha
 **Fix:** `panel.setAppearance_(NSAppearance.appearanceNamed_(NSAppearanceNameVibrantDark))`.
 
 **Avoid next time:** for any custom-styled window, actually look at it in the current system appearance (crop a capture). Since the caption is excluded from screenshots, temporarily set `NSWindowSharingReadOnly` to capture it. Functional checks can't catch contrast problems.
+
+---
+
+## 10. cactus sends telemetry by default (Phase 8)
+
+**What:** `cactus.transcribe()` and `cactus.stream()` call an internal `track()` that POSTs anonymous usage counts (function name, package and engine version, OS, arch, Python version, an anonymous id) to a Supabase endpoint. No audio or text is sent. The user's reference script didn't show this.
+
+**Why:** it's on by default in `cactus/_telemetry.py`. It's disabled by `CACTUS_TELEMETRY=0`, `DO_NOT_TRACK`, or `CI`, and the variable is read at **import time**.
+
+**Fix:** `asr.py` sets `CACTUS_TELEMETRY` from `config.cactus_telemetry` (default `False`) before anything imports cactus.
+
+**Avoid next time:** when adding an ML or SDK dependency, grep its package for `urllib`, `requests`, `telemetry`, `track`, and `analytics` before wiring it in.
+
+---
+
+## 11. Whistle transcribes near-silence as "you" (Phase 8)
+
+**What:** a session that only recorded room noise produced the final transcript `'you'`.
+
+**Why:** like Whisper-family models, Whistle can hallucinate a short common word on near-silent audio. Pure digital silence is skipped, but real mic noise isn't.
+
+**Fix:** none yet. Phase 11 must treat very short, low-confidence finals as "no speech" (word `probability` is available), with thresholds in config.
+
+**Avoid next time:** test ASR with real ambient mic noise, not only with silence or clean speech.
+
+---
+
+## 12. `print()` from several threads can merge lines (Phase 8)
+
+**What:** log lines from `asr-stream`, `audio-worker`, and the main thread ran together on one line.
+
+**Why:** `print(msg)` writes the message and the trailing newline as separate writes, so another thread's output can land between them.
+
+**Fix:** `log()` does a single `sys.stdout.write(line + "\n")` followed by `flush()`.
+
+**Avoid next time:** in multi-threaded code, log through one function that writes each line in a single call.

@@ -103,9 +103,20 @@ class AudioProcessingWorker(_BoundedWorker):
 
     def __init__(self, processor: AudioProcessor, on_transcript, maxsize: int = 100):
         super().__init__("audio-worker", maxsize)
-        self.processor = processor
         self.on_transcript = on_transcript
         self.chunks = 0
+        self.processor = processor
+
+    @property
+    def processor(self):
+        return self._processor
+
+    @processor.setter
+    def processor(self, processor) -> None:
+        # Processors that produce text asynchronously (CactusProcessor) post it themselves.
+        if hasattr(processor, "post"):
+            processor.post = lambda *args: AppHelper.callAfter(self.on_transcript, *args)
+        self._processor = processor
 
     def _put_control(self, msg) -> None:
         # Control messages are never dropped; wait briefly for space instead.

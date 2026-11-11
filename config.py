@@ -37,6 +37,13 @@ class Config:
     # continues in the same capture folder. 0 disables reuse.
     session_reuse_window_s: float = 10.0
 
+    # speech recognition (cactus Whistle)
+    cactus_telemetry: bool = False  # cactus sends anonymous usage counts unless disabled
+    asr_language: str | None = "en"  # None = auto-detect (en, de, fr, es, it, nl, pl)
+    asr_keywords: tuple = ()  # words/phrases to bias recognition toward
+    asr_chunk_s: float = 1.0  # audio fed to Whistle.stream() per pass
+    model_wait_timeout_s: float = 60.0  # how long a session's audio waits for the model to load
+
     # caption
     caption_hide_delay_s: float = 2.0
     # Use a fake audio processor that emits placeholder words (to exercise the caption before real STT).

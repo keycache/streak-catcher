@@ -321,6 +321,7 @@ class AudioProcessor:
 
 | Item | Action |
 |---|---|
+| Speech model status (disabled) | "Loading speech model…", then "Speech model ready" or "Speech model unavailable" (or "Speech: fake transcript (config)"). Set synchronously at launch, then updated from the loading thread with `callAfter` |
 | ✓ Hotkey Enabled | Toggles `hotkey.enabled`. Disabling during a session calls `stop("disabled")` |
 | Open Captures Folder | `NSWorkspace.sharedWorkspace().openURL_(NSURL.fileURLWithPath_(captures_dir))` (creates the folder if needed) |
 | Show Last Transcript | `NSAlert` with the last final transcript, or "(no transcript yet)". Activates the app for the alert |
@@ -367,7 +368,7 @@ captures/
 
 `captures/` is added to `.gitignore`.
 
-From Phases 9–11 each session folder also gets `path.json` (cursor path), `frames.json` (frame triggers and dedup), `context_N.jpg` (annotated overviews), and `request.json` (the assembled LLM request). See §17.
+From Phase 8 each session folder gets `transcript.json` (final text and word timestamps). From Phases 9–11 it also gets `path.json` (cursor path), `frames.json` (frame triggers and dedup), `context_N.jpg` (annotated overviews), and `request.json` (the assembled LLM request). See §17.
 
 ## 14. Logging and debugging (`log.py`)
 
@@ -428,7 +429,10 @@ Measured on this Mac (synthetic 3.4 s sentence, 1 s chunks): import ~50 ms, `Whi
 - **`CactusProcessor`** (replaces the `AudioProcessor` stub, on the `audio-worker` thread): per session segment, one `stream()` over a generator that regroups the recorder's 100 ms chunks into `asr_chunk_s` chunks. The `end` message ends the generator, so the tail commits. Each yielded step sends `on_transcript(committed + pending, is_final=False)`. The final message carries the joined committed text and all words.
 - **Clock:** word times are relative to the segment's first audio sample. Add the recorder's start offset (`t_offset_s` of chunk 1) to put them on the session clock shared with gestures and frames.
 - **Before ready:** sessions are allowed. Chunks queue in the worker and are streamed once the model has loaded.
-- **Caption:** committed text in white, the `pending` tail dimmed, updated about every 1 s.
+- **Caption:** committed text in white, the `pending` tail dimmed (`CaptionPanel.set_parts`), updated about every 1 s. Captions from an older session's late results never overwrite a newer session's caption.
+- **Push vs pull:** `stream()` pulls from a generator, but the audio worker pushes chunks. So each segment gets its own `asr-stream` thread that pulls regrouped chunks from a queue, and `CactusProcessor` posts results itself through `post(text, is_final, pending, words, session)`, which the worker wires to `controller.on_transcript` via `callAfter`. The audio worker never blocks, even while the model loads.
+- **Output:** final words (session clock) accumulate on `Session.words`, and `transcript.json` (`{"session", "text", "words": [{"word", "start", "end", "p"}]}`) is written to the session folder after each segment.
+- **Known behavior:** near-silent input can produce a hallucinated short transcript (for example "you"), as with Whisper-style models. Phase 11 has to treat very short, low-confidence finals as "no speech".
 
 ### 17.2 Cursor path and gestures (Phase 9)
 

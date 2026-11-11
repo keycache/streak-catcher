@@ -90,6 +90,11 @@ class AppDelegate(NSObject):
         self.set_active(False)
 
         menu = NSMenu.alloc().init()
+        menu.setAutoenablesItems_(False)
+        self.model_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Speech model: starting…", None, "")
+        self.model_item.setEnabled_(False)
+        menu.addItem_(self.model_item)
+        menu.addItem_(NSMenuItem.separatorItem())
         self.hotkey_item = self._add_item(menu, "Hotkey Enabled", "toggleHotkey:")
         self.hotkey_item.setState_(1)
         self._add_item(menu, "Open Captures Folder", "openCaptures:")
@@ -103,6 +108,10 @@ class AppDelegate(NSObject):
         item.setTarget_(self)
         menu.addItem_(item)
         return item
+
+    def set_model_status(self, text: str):
+        """Update the disabled status line at the top of the menu. Main thread only."""
+        self.model_item.setTitle_(text)
 
     def set_active(self, active: bool):
         """Switch the menu bar icon between idle and recording. Main thread only."""
