@@ -21,9 +21,9 @@ Companion to [PLAN.md](./PLAN.md). This document describes how each part is buil
 | Python | 3.14 (root uv venv at `./.venv`) |
 | Run | `.venv/bin/python main.py` (from the repo root) |
 | Dependencies (root `pyproject.toml`) | `pyaudio`, `pynput` (1.8.x), `pyobjc-framework-Cocoa`, `pyobjc-framework-Quartz` (13.x), `numpy` |
-| Not imported at startup | `torch`, `nemo` (`asr/main.py`). These are only loaded when real STT is added (Phase 8) |
+| Not imported at startup | `torch`, `nemo`. These come with the `asr` module, which will be provided later and is only loaded when real STT is added (Phase 8) |
 
-Dependencies are added with `uv add --no-sync` plus `uv pip install`. A plain `uv sync` would remove torch and NeMo, which are installed in the venv but not declared in `pyproject.toml`.
+Dependencies are added with `uv add`. If the `asr` module later brings torch and NeMo, declare them in `pyproject.toml` too, so a `uv sync` doesn't remove them.
 
 Verified on this machine:
 
@@ -75,7 +75,7 @@ class Config:
     capture_interval_s: float = 0.5
     jpeg_quality: float = 0.85
 
-    # audio (must match asr/main.py)
+    # audio (must match the asr module, provided later)
     sample_rate: int = 16000
     channels: int = 1
     chunk_size: int = 1600                                 # 100 ms
@@ -90,7 +90,7 @@ class Config:
     debug: bool = os.environ.get("STREAK_DEBUG") == "1"
 ```
 
-The audio values are **copied** from `asr/main.py` (`SAMPLE_RATE`, `CHUNK_SIZE`) instead of imported, because importing that module loads torch and NeMo, which takes seconds and gigabytes of memory.
+The audio values are **defined here** instead of imported from the `asr` module (provided later, expected at `asr/main.py` with `SAMPLE_RATE`, `CHUNK_SIZE`), because importing that module loads torch and NeMo, which takes seconds and gigabytes of memory. When `asr` arrives, check that its values match these.
 
 ## 4. Threading model
 
@@ -241,7 +241,7 @@ class CapturedFrame:
 
 ## 9. Audio capture (`audio_capture.py`)
 
-Settings match `asr/main.py` exactly:
+Settings below are the contract the `asr` module (provided later) is expected to match:
 
 | Parameter | Value |
 |---|---|
@@ -296,7 +296,7 @@ class AudioProcessor:
 
 `AudioProcessingWorker`: a daemon thread with `queue.Queue(maxsize=100)` (10 s of audio). It handles three kinds of messages: `("start", session)`, `("chunk", AudioChunk)`, and `("end", None)`. Any non-`None` text is sent to the main thread with `callAfter(controller.on_transcript, text, is_final)`.
 
-**Phase 8 integration** (not built yet): `AudioProcessor` lazily imports `asr.main` and calls `load_model(MODELS["tdt"])` on a background thread at app start. It reproduces the logic from `listen()` (noise calibration, RMS VAD, pre-roll, `PARTIAL_EVERY`, `SILENCE_CHUNKS`, `MAX_UTTERANCE_CHUNKS`) on the incoming chunks, calling `transcribe(model, np.concatenate(utterance))`. The chunk format above is already what those functions expect.
+**Phase 8 integration** (not built yet; the `asr` module will be provided later and the details below are what it's expected to expose): `AudioProcessor` lazily imports `asr.main` and calls `load_model(MODELS["tdt"])` on a background thread at app start. It reproduces the logic from `listen()` (noise calibration, RMS VAD, pre-roll, `PARTIAL_EVERY`, `SILENCE_CHUNKS`, `MAX_UTTERANCE_CHUNKS`) on the incoming chunks, calling `transcribe(model, np.concatenate(utterance))`. The chunk format above is already what those functions expect.
 
 ## 11. Menu bar and caption UI
 

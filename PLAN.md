@@ -12,6 +12,8 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 
 ## Working rules (apply to every request on this project)
 
+- This is a **toy project**. Rough edges are OK: prefer simple, working code over polish, edge-case handling, or abstractions.
+- Keep testing **minimal**: just enough to confirm the basic core workflow works (hold the combo → streak + screenshots + audio → release → session folder with frames and `audio.wav`).
 - If there are issues and the app still doesn't work after multiple changes, add `print` statements to debug the underlying issue. Include the necessary information: thread name, timestamps, key codes, display IDs, file paths, queue sizes, permission state, and exceptions with tracebacks.
 - Do **not** create summary files when a phase is completed.
 - The **only** two Markdown files are `PLAN.md` and `SPECIFICATIONS.md`.
@@ -32,11 +34,11 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 | Streak | White/cyan glow, short fade (~250 ms), visible in screenshots |
 | Capture | Quartz `CGDisplayCreateImage`, display where the combo started (fixed), every 500 ms whether or not the mouse moves |
 | Images | JPEG saved to a per-session folder, then passed to a per-image background worker |
-| Audio | Same as `asr/main.py`: PyAudio, 16 kHz, mono, int16 → float32, 1600-sample (100 ms) chunks |
+| Audio | PyAudio, 16 kHz, mono, int16 → float32, 1600-sample (100 ms) chunks (the format the `asr` module expects) |
 | Audio save | Session audio is also saved as `audio.wav` |
-| STT | Engine comes from `asr/main.py` (Parakeet via NeMo). Stub for now |
+| STT | Engine comes from the `asr` module (Parakeet via NeMo), **to be provided later** by the user. Stub until then |
 | Transcript UI | Floating caption panel at the bottom of the screen |
-| Tests | None |
+| Tests | Minimal. Only check that the basic core workflow works (see Working rules) |
 
 ---
 
@@ -44,10 +46,10 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 
 **Goal:** an empty, runnable app in the repo root.
 
-- [x] Add dependencies to the root `pyproject.toml` with `uv add --no-sync` (`pyaudio`, `pynput`, `pyobjc-framework-Cocoa`, `pyobjc-framework-Quartz`), then `uv pip install` them. `--no-sync` stops uv from removing the undeclared torch and NeMo.
+- [x] Add dependencies to the root `pyproject.toml` with `uv add` (`pyaudio`, `pynput`, `pyobjc-framework-Cocoa`, `pyobjc-framework-Quartz`, `numpy`).
 - [x] Verify that `CGDisplayCreateImage` works on macOS 26 and the pynput left-modifier codes are correct (59 / 56 / 58).
-- [ ] Create the root files: `main.py` (entry point) and `config.py`.
-- [ ] Add `captures/` to `.gitignore`.
+- [x] Create the root files: `main.py` (entry point) and `config.py`.
+- [x] Add `captures/` to `.gitignore`.
 
 **Done when:** `.venv/bin/python main.py` starts and exits cleanly, printing the config.
 
@@ -102,7 +104,7 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 **Goal:** the mic is live only during a session. Chunks are streamed to a stub processor and saved to WAV.
 
 - [ ] `audio_capture.py`: an `AudioRecorder` thread that opens a PyAudio stream (paInt16, 1 channel, 16 kHz, 1600 frames) when the session starts and closes it on stop.
-- [ ] Convert each chunk to float32 with the same formula as `asr/main.py` and send it to the `AudioProcessingWorker` queue.
+- [ ] Convert each chunk to float32 (`np.frombuffer(data, np.int16).astype(np.float32) / 32768.0`, see the Specification, §9) and send it to the `AudioProcessingWorker` queue.
 - [ ] Write the raw int16 data to `audio.wav` using the `wave` module.
 - [ ] `processing.py`: an `AudioProcessor` stub with `start_session()`, `process_chunk(chunk) -> str | None`, and `end_session() -> str | None`. All of them return `None` for now.
 
@@ -132,5 +134,5 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 
 ## Phase 8 (future): Real transcription and image analysis
 
-- [ ] Replace the `AudioProcessor` stub with a wrapper around `asr/main.py` (`load_model`, `transcribe`) that reuses its VAD and partial-transcript logic. Load the model lazily at app start on a background thread.
+- [ ] *(Blocked until the user provides the `asr` module.)* Replace the `AudioProcessor` stub with a wrapper around `asr` (`load_model`, `transcribe`) that reuses its VAD and partial-transcript logic. Load the model lazily at app start on a background thread.
 - [ ] Implement real logic in `process_image`.

@@ -8,3 +8,9 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Runtime output
+captures/
+
+.DS_Store
+Thumbs.db
