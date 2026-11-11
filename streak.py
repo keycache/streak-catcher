@@ -99,6 +99,7 @@ class StreakOverlay:
         self._timer = None
         self._target = StreakTimerTarget.alloc().initWithCallback_(self._tick)
         self._last_bounds = None
+        self.on_sample = None  # fn(x, y, t_monotonic), called for every sample while sampling
         glow = NSColor.colorWithCalibratedRed_green_blue_alpha_(*config.streak_glow_rgba)
         core = NSColor.colorWithCalibratedRed_green_blue_alpha_(*config.streak_core_rgba)
         self._passes = [
@@ -179,6 +180,8 @@ class StreakOverlay:
         if self.sampling:
             p = NSEvent.mouseLocation()
             self.trail.add(p.x, p.y, now)
+            if self.on_sample is not None:
+                self.on_sample(p.x, p.y, now)
         self.trail.prune(now)
 
         pad = max(self.cfg.streak_widths)

@@ -93,8 +93,10 @@ class ScreenCapturer(threading.Thread):
         mouse = NSEvent.mouseLocation()
         img = Quartz.CGDisplayCreateImage(self.session.display_id)
         if img is None:
-            log("capture", f"CGDisplayCreateImage returned None for display {self.session.display_id} "
-                           "(display gone or Screen Recording denied); skipping")
+            ms = (time.monotonic() - t0) * 1000
+            log("capture", f"CGDisplayCreateImage returned None for display {self.session.display_id} after "
+                           f"{ms:.0f} ms ({'capture service stalled' if ms > 2000 else 'display gone or Screen Recording denied'}); "
+                           "skipping")
             return
         if self.scale != 1.0:
             img = scale_image(img, self.scale)

@@ -10,6 +10,8 @@ from config import CONFIG
 from log import log, log_exc
 from audio_capture import AudioRecorder
 from caption import CaptionPanel
+import gesture_debug
+from gestures import GestureDetector
 from processing import AudioProcessingWorker, AudioProcessor, FakeAudioProcessor, ImageProcessingWorker
 from screen_capture import ScreenCapturer
 from session import create_session
@@ -47,6 +49,8 @@ class SessionController:
         self.image_worker = ImageProcessingWorker()
         self.image_worker.start()
         self.capturer = None
+        self.detector = None
+        self.streak.on_sample = self._on_sample
         self.speech = None
         if config.fake_transcript:
             processor = FakeAudioProcessor()
@@ -81,6 +85,7 @@ class SessionController:
         s = self.session
         how = f"continuing (segment {s.segment}, from frame {s.frame_count + 1})" if s.segment > 1 else "new"
         log("session", f"start {s.id} {how} display={s.display_id} folder={s.folder}")
+        self.detector = GestureDetector(self._on_gesture, first_index=len(s.gestures) + 1, config=self.cfg)
         try:
             self.streak.start()
         except Exception:
@@ -98,7 +103,7 @@ class SessionController:
             log_exc("session", "audio failed to start")
         try:
             if self.cfg.screen_capture_enabled:
-                self.capturer = ScreenCapturer(self.session, self.image_worker.submit, self.cfg)
+                self.capturer = ScreenCapturer(self.session, self._on_frame, self.cfg)
                 self.capturer.start()
             else:
                 log("session", "screen capture disabled (config.screen_capture_enabled=False)")
@@ -127,6 +132,12 @@ class SessionController:
             chunks = self.recorder.count
             self.recorder = None
             self.audio_worker.end_session()
+        if self.detector is not None:
+            try:
+                self.detector.finish()
+            except Exception:
+                log_exc("gesture", "gesture detection failed at stop")
+            self.detector = None
         if reason == "quit":
             self.streak.close()
             self.caption.close()
@@ -137,9 +148,50 @@ class SessionController:
         s = self.session
         s.frame_count += frames
         s.ended_at = time.monotonic()
+        self._write_path(s)
+        if self.cfg.gesture_debug_images and s.gestures:
+            gesture_debug.render_async(s, s.frames, self.cfg.jpeg_quality)
         self.last_session, self.session = s, None
         log("session", f"stop {s.id} ({reason}): segment {s.segment} {s.ended_at - s.segment_started_at:.2f}s, "
-                       f"{frames} frames ({s.frame_count} in folder), {chunks} audio chunks, folder={s.folder}")
+                       f"{frames} frames ({s.frame_count} in folder), {chunks} audio chunks, {len(s.gestures)} gestures, "
+                       f"folder={s.folder}")
+
+    def _on_frame(self, frame) -> None:
+        """Capture thread: remember the frame for this session, then hand it to the image worker."""
+        if self.session is not None and frame.session_id == self.session.id:
+            self.session.frames.append((frame.t_offset_s, frame.path, frame.display_id))
+        self.image_worker.submit(frame)
+
+    def _on_sample(self, x: float, y: float, now: float) -> None:
+        """Every streak sample (main thread, ~120 Hz) while a session is active."""
+        s = self.session
+        if s is None or self.detector is None:
+            return
+        t = now - s.started_at
+        s.path.append((round(t, 4), round(x, 1), round(y, 1)))
+        try:
+            self.detector.feed(t, x, y)
+        except Exception:
+            log_exc("gesture", "gesture detection failed")
+            self.detector = None
+
+    def _on_gesture(self, g) -> None:
+        s = self.session or self.last_session
+        if s is not None:
+            s.gestures.append(g)
+        x, y, w, h = g.bbox
+        log("gesture", f"#{g.index} {g.kind} t={g.t_start:.2f}-{g.t_end:.2f}s bbox=({x:.0f},{y:.0f}) {w:.0f}x{h:.0f}")
+
+    def _write_path(self, s) -> None:
+        try:
+            (s.folder / "path.json").write_text(json.dumps({
+                "session": s.id,
+                "coords": "global Cocoa points (origin bottom-left of primary screen, y up); t = s since session start",
+                "samples": s.path,
+                "gestures": [g.to_dict() for g in s.gestures],
+            }))
+        except Exception:
+            log_exc("gesture", "writing path.json failed")
 
     def on_transcript(self, text: str, is_final: bool, pending: str = "", words=None, session=None) -> None:
         """Text from the audio processor (main thread)."""

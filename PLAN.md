@@ -175,11 +175,12 @@ ASR engine: **`cactus-compute`** (`cactus.agent.whistle.Whistle`), following the
 
 **Goal:** know when the user circled or underlined something, and where.
 
-- [ ] Record the cursor path for each session `(t, x, y)` from the streak sampler (120 Hz) and save it as `path.json` in the session folder (also used to tune thresholds).
-- [ ] Segment the path into strokes at pauses: speed below `gesture_pause_speed_pt_s` for at least `gesture_pause_s`.
-- [ ] Classify strokes (all thresholds in config): **circle**: cumulative turning ≥ `circle_min_turn_deg`, end-to-start distance ≤ `circle_close_ratio` × bounding-box diagonal, aspect ≤ `circle_max_aspect`, size ≥ `gesture_min_size_pt`. **Underline**: vertical extent ≤ `underline_max_dy_ratio` × horizontal extent, width ≥ `underline_min_dx_pt`, at least `underline_min_reversals` direction reversals (↔). Everything else is ordinary cursor movement and is ignored.
-- [ ] Emit `Gesture(index, kind, t_start, t_end, bbox)` events during the session.
-- [ ] `.tmp/scripts` replay check: recorded paths go in, the expected gestures come out.
+- [x] Record the cursor path for each session `(t, x, y)` from the streak sampler (120 Hz) and save it as `path.json` in the session folder (also used to tune thresholds).
+- [x] Segment the path into strokes at pauses: speed below `gesture_pause_speed_pt_s` for at least `gesture_pause_s`.
+- [x] Classify strokes (all thresholds in config): **circle**: cumulative turning ≥ `circle_min_turn_deg`, end-to-start distance ≤ `circle_close_ratio` × bounding-box diagonal, aspect ≤ `circle_max_aspect`, size ≥ `gesture_min_size_pt`. **Underline**: vertical extent ≤ `underline_max_dy_ratio` × horizontal extent, width ≥ `underline_min_dx_pt`, at least `underline_min_reversals` direction reversals (↔). Everything else is ordinary cursor movement and is ignored.
+- [x] Emit `Gesture(index, kind, t_start, t_end, bbox)` events during the session.
+- [x] `.tmp/scripts` replay check: recorded paths go in, the expected gestures come out.
+- [x] Debug images: with `STREAK_DEBUG=1` (`gesture_debug_images`), each gesture is drawn (path + numbered box) on the nearest saved frame as `debug_gesture_N.jpg` in the session folder.
 
 **Done when:** deliberate circles and ↔ underlines are detected with correct bounding boxes and times, and normal cursor travel (including fast horizontal moves) produces no gestures.
 
@@ -240,9 +241,9 @@ All questions are answered. Every tunable value is a `config.py` field; the defa
 |---|---|---|
 | ASR | cactus Whistle in-process, telemetry off | `asr_language` (`"en"`), `asr_keywords` (`()`), `asr_chunk_s` (`1.0`), `cactus_telemetry` (`False`) |
 | Copilot images | Supported as file attachments by absolute path | — |
-| Strokes | Split at pauses | `gesture_pause_s` (`0.15`), `gesture_pause_speed_pt_s` (`60`), `gesture_min_size_pt` (`30`) |
-| Circle | Turning + closure + aspect | `circle_min_turn_deg` (`300`), `circle_close_ratio` (`0.35`), `circle_max_aspect` (`3.0`) |
-| Underline | Flat ↔ stroke with reversals | `underline_max_dy_ratio` (`0.3`), `underline_min_dx_pt` (`60`), `underline_min_reversals` (`1`) |
+| Strokes | Split at pauses; speed over a short window; resampled before measuring turns | `gesture_pause_s` (`0.15`), `gesture_pause_speed_pt_s` (`60`), `gesture_speed_window_s` (`0.05`), `gesture_resample_pt` (`4`), `gesture_min_size_pt` (`30`) |
+| Circle | Loop found anywhere inside a stroke (turning + closure + aspect); repeated loops merge | `circle_min_turn_deg` (`300`), `circle_close_ratio` (`0.35`), `circle_max_aspect` (`3.0`), `gesture_merge_overlap` (`0.6`, same stroke), `gesture_merge_iou` (`0.5`, across pauses) |
+| Underline | Flat ↔ legs with reversals; short legs (overshoot fixes) folded away | `underline_max_dy_ratio` (`0.3`), `underline_min_dx_pt` (`60`), `underline_min_leg_pt` (`30`), `underline_min_reversals` (`1`); robust line-fit trim: `underline_band_pt` (`12`), `underline_max_slope` (`0.25`), `underline_max_gap_pts` (`6`) |
 | Rolling buffer | Keep the 500 ms cadence | `frame_buffer_interval_s` (`0.5`), `frame_buffer_s` (`4.0`), `safety_net_interval_s` (`2.0`) |
 | Dedup / contexts | Changed area on grayscale thumbnails | `dedup_thumb_width` (`256`), `dedup_pixel_delta` (`24`), `dedup_changed_pct` (`3.0`) |
 | Image cap | No cap; keep the most recent when capped | `max_images` (`None`), `truncate_keep` (`"end"`) |

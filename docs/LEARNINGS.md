@@ -156,3 +156,39 @@ Non-obvious technical gotchas hit while building Streak Catcher: surprising beha
 **Fix:** `log()` does a single `sys.stdout.write(line + "\n")` followed by `flush()`.
 
 **Avoid next time:** in multi-threaded code, log through one function that writes each line in a single call.
+
+---
+
+## 13. Real circling is a continuous spiral, not separate clean loops (Phase 9)
+
+**What:** the first real session (circling one area while talking for 5 s) produced **3 circle gestures** instead of 1. Synthetic tests had passed.
+
+**Why:** the user circled about 8 times **without ever pausing**, in a slowly shrinking spiral with a small kink loop near the end. The detector split it into loops correctly, but the merge rule (IoU ≥ 0.5) can't merge a small loop lying *inside* a big one: containment gives a low IoU.
+
+**Fix:** within one continuous stroke, merge consecutive loops by **overlap ÷ smaller area** (`gesture_merge_overlap`). Across pauses, keep the stricter IoU rule. The recorded path is now a regression fixture (`.tmp/fixtures/path_spiral_173510.json`).
+
+**Avoid next time:** synthetic gestures are too clean. Record a few real sessions (`path.json`), render them (`.tmp/scripts/plot_path.py`), and add them as fixtures before trusting thresholds.
+
+---
+
+## 14. Legacy screen capture APIs can stall for seconds and return `None` (Phase 9)
+
+**What:** during a check run, every `CGDisplayCreateImage` call blocked for about **5 s** and returned `None`. `CGWindowListCreateImage` blocked for **30 s**. The session got 0 frames. At the same time, Screen Recording preflight returned `True`, the display was awake and unlocked, no permission dialog was on screen, and Apple's `screencapture` CLI (ScreenCaptureKit) worked in 0.27 s. Captures had worked from the same host app an hour earlier and 8 minutes earlier. The root cause is not known.
+
+**Why (suspected):** the deprecated CoreGraphics capture path goes through a WindowServer service that can stall independently of ScreenCaptureKit.
+
+**Fix:** the capture log now reports the elapsed time and says "capture service stalled" when a `None` takes longer than 2 s, instead of blaming permissions. If it recurs, fall back to ScreenCaptureKit (`SCScreenshotManager`).
+
+**Avoid next time:** when a capture returns `None`, log how long it took. A fast `None` means permission or display trouble; a slow one means a stalled service.
+
+---
+
+## 15. Approach travel gets absorbed into an underline (Phase 9)
+
+**What:** a real underline came out as a 575×141 box starting 1.2 s early. The debug image showed the slanted approach move (from the bottom right up to the text line) included in the underline.
+
+**Why:** the user moved to the text and started scribbling **without pausing**, so approach and underline were one stroke. The approach leg was 460 pt wide and about 140 pt tall, which is just inside the "flat enough" ratio (0.3), so it counted as the first underline leg.
+
+**Fix:** after finding a candidate, fit the dominant near-horizontal line robustly (RANSAC plus a least-squares refit on inliers), keep only the longest run of points within a ±12 pt band, and re-validate. The box went to 398×23 and the start time to the real start of the scribble. The session is now a fixture (`.tmp/fixtures/path_underline_approach_181302.json`).
+
+**Avoid next time:** per-leg shape tests are fooled by travel that happens to be shaped like a leg. When most points share one structure (a line, a loop), fit that structure robustly and measure the gesture from its inliers.

@@ -368,7 +368,7 @@ captures/
 
 `captures/` is added to `.gitignore`.
 
-From Phase 8 each session folder gets `transcript.json` (final text and word timestamps). From Phases 9–11 it also gets `path.json` (cursor path), `frames.json` (frame triggers and dedup), `context_N.jpg` (annotated overviews), and `request.json` (the assembled LLM request). See §17.
+From Phase 8 each session folder gets `transcript.json` (final text and word timestamps), and from Phase 9 `path.json` (cursor path and detected gestures). From Phases 10–11 it also gets `frames.json` (frame triggers and dedup), `context_N.jpg` (annotated overviews), and `request.json` (the assembled LLM request). See §17.
 
 ## 14. Logging and debugging (`log.py`)
 
@@ -437,12 +437,17 @@ Measured on this Mac (synthetic 3.4 s sentence, 1 s chunks): import ~50 ms, `Whi
 ### 17.2 Cursor path and gestures (Phase 9)
 
 - The streak sampler already reads the cursor at 120 Hz. Each sample `(t, x, y)` (session-relative seconds, global Cocoa coordinates) is also appended to the session path and saved as `path.json`.
-- **Strokes:** split the path at pauses (speed below `gesture_pause_speed_pt_s` for at least `gesture_pause_s`).
-- **Circle:** the stroke closes (end-to-start distance ≤ `circle_close_ratio` × bounding-box diagonal), cumulative signed turning reaches about ±360° (≥ `circle_min_turn_deg`), the bounding-box aspect ratio is within `circle_max_aspect`, and the size is at least `gesture_min_size_pt`.
+- **Strokes:** split the path at pauses (speed below `gesture_pause_speed_pt_s` for at least `gesture_pause_s`). Speed is measured over `gesture_speed_window_s`, not sample to sample, because the 120 Hz sampler often repeats a position between mouse events. Each stroke is resampled every `gesture_resample_pt` before measuring turns, so jitter doesn't add turning.
+- **Circle:** searched as a **loop anywhere inside the stroke** (circling then moving away without a pause still counts). For each end point, scan back for the nearest start where the loop closes (end-to-start distance ≤ `circle_close_ratio` × bounding-box diagonal), cumulative signed turning reaches about ±360° (≥ `circle_min_turn_deg`), the bounding-box aspect ratio is within `circle_max_aspect`, and the size is at least `gesture_min_size_pt`.
 - **Underline:** mostly horizontal (vertical extent ≤ `underline_max_dy_ratio` × horizontal extent) with **at least `underline_min_reversals` direction reversals** (↔ back-and-forth), and width ≥ `underline_min_dx_pt`. A single horizontal sweep is treated as cursor travel.
 - Only circle and underline are supported. The overlay can't take clicks, so there is no free drawing.
-- Output: `Gesture(index, kind, t_start, t_end, bbox_global)`, numbered in time order within the session.
+- **Merging repeated circling:** loops in **one continuous stroke** merge when overlap ÷ smaller-box area ≥ `gesture_merge_overlap` (so a spiral of shrinking loops, including small kinks inside the big loop, is one gesture). Loops in **separate strokes** (a pause between them) merge only at IoU ≥ `gesture_merge_iou`, so "circle a panel, pause, circle a button inside it" stays two gestures. The merged bbox is the union.
+- **Underline trimming (robust line fit):** a candidate run can include stray travel, such as a slanted approach whose leg is nearly flat enough. Fit the dominant near-horizontal line with RANSAC (candidate point pairs, slope ≤ `underline_max_slope`, score = points within ±`underline_band_pt`), then refit by least squares on the inliers. Keep the **longest run of inliers in time** (bridging outlier gaps of ≤ `underline_max_gap_pts` resampled points), and re-check width ≥ `underline_min_dx_pt` and ≥ `underline_min_reversals` reversals. The bbox and `t_start`/`t_end` come from the kept points only.
+- Underline legs narrower than `underline_min_leg_pt` (jitter at a reversal, or a small overshoot correction after travel) are folded into the neighboring leg, so ordinary travel doesn't produce a reversal.
+- Implementation: `gestures.py` (pure Python, no AppKit), `GestureDetector.feed(t, x, y)` from `StreakOverlay.on_sample`, `finish()` on stop. Classification runs when a stroke ends (about 6 ms for a 2 s stroke, 50 ms for a 10 s one). Debug mode logs per-stroke metrics (points, bbox, total turn, result) for tuning.
+- Output: `Gesture(index, kind, t_start, t_end, bbox)` with bbox `(x, y, w, h)` in global Cocoa points, numbered in time order within the session and continuing across reused segments. Stored on `Session.gestures` and in `path.json` (`{"session", "coords", "samples": [[t, x, y]], "gestures": [...]}`), which is rewritten at every stop.
 - Thresholds are tuned by replaying recorded `path.json` files through a check script.
+- **Debug images** (`gesture_debug.py`, when `gesture_debug_images`, which defaults to on with `STREAK_DEBUG=1`): after each stop, a `gesture-debug` thread writes `debug_gesture_N.jpg` to the session folder: the saved frame nearest the gesture's `t_start`, with the gesture's path (yellow), its bbox (magenta), and a label `#N kind t_start-t_end (frame @ t)`. Global Cocoa points map to frame pixels as `(p - screen_origin) × (frame_width / screen_width)`; both use a y-up origin, so no flip is needed. The session keeps `Session.frames` (`(t_offset_s, path, display_id)`) for this. Without screen capture, no image is written (logged).
 
 ### 17.3 Event-driven capture (Phase 10)
 
@@ -491,10 +496,13 @@ class LLMProvider(Protocol):
 | `asr_language` | `"en"` | `None` = auto-detect (en, de, fr, es, it, nl, pl) |
 | `asr_keywords` | `()` | Keyword biasing for UI and app terms |
 | `asr_chunk_s` | `1.0` | Chunk length fed to `stream()` |
-| `gesture_pause_s` / `gesture_pause_speed_pt_s` | `0.15` / `60` | Stroke segmentation |
+| `gesture_pause_s` / `gesture_pause_speed_pt_s` / `gesture_speed_window_s` | `0.15` / `60` / `0.05` | Stroke segmentation |
+| `gesture_debug_images` | `STREAK_DEBUG=1` | Write `debug_gesture_N.jpg` per gesture after each session |
+| `gesture_resample_pt` / `gesture_merge_overlap` / `gesture_merge_iou` | `4` / `0.6` / `0.5` | Path resampling; merging loops within one stroke (containment) / across strokes (IoU) |
 | `gesture_min_size_pt` | `30` | Ignore tiny strokes |
 | `circle_min_turn_deg` / `circle_close_ratio` / `circle_max_aspect` | `300` / `0.35` / `3.0` | Circle detection (closure relative to bbox diagonal) |
-| `underline_max_dy_ratio` / `underline_min_dx_pt` / `underline_min_reversals` | `0.3` / `60` / `1` | Underline (↔) detection |
+| `underline_max_dy_ratio` / `underline_min_dx_pt` / `underline_min_leg_pt` / `underline_min_reversals` | `0.3` / `60` / `30` / `1` | Underline (↔) detection |
+| `underline_band_pt` / `underline_max_slope` / `underline_max_gap_pts` | `12` / `0.25` / `6` | Robust line fit that trims stray travel from underlines |
 | `frame_buffer_interval_s` / `frame_buffer_s` | `0.5` / `4.0` | Rolling in-memory frame buffer |
 | `safety_net_interval_s` | `2.0` | Periodic safety-net capture |
 | `dedup_thumb_width` / `dedup_pixel_delta` / `dedup_changed_pct` | `256` / `24` / `3.0` | Changed-area duplicate and context test |

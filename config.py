@@ -44,6 +44,27 @@ class Config:
     asr_chunk_s: float = 1.0  # audio fed to Whistle.stream() per pass
     model_wait_timeout_s: float = 60.0  # how long a session's audio waits for the model to load
 
+    # gestures (cursor path; points = global Cocoa coordinates). Tune from recorded path.json files.
+    gesture_speed_window_s: float = 0.05  # speed measured over this window (mouse events can repeat samples)
+    gesture_pause_speed_pt_s: float = 60.0  # slower than this counts as paused
+    gesture_pause_s: float = 0.15  # a pause this long ends a stroke
+    gesture_resample_pt: float = 4.0  # path resampling spacing before measuring turns
+    gesture_min_size_pt: float = 30.0  # ignore smaller gestures
+    gesture_merge_iou: float = 0.5  # circles in separate strokes (pause between) merge at this IoU
+    # Write debug_gesture_N.jpg (gesture path + box on the nearest frame) after each session. Defaults to STREAK_DEBUG.
+    gesture_debug_images: bool = field(default_factory=lambda: os.environ.get("STREAK_DEBUG") == "1")
+    gesture_merge_overlap: float = 0.6  # loops in one continuous stroke merge when overlap/smaller-area >= this
+    circle_min_turn_deg: float = 300.0  # cumulative turning needed for a loop
+    circle_close_ratio: float = 0.35  # end-to-start gap / bbox diagonal
+    circle_max_aspect: float = 3.0  # bbox long side / short side
+    underline_max_dy_ratio: float = 0.3  # height / width of the underline
+    underline_min_dx_pt: float = 60.0  # minimum underline width
+    underline_min_leg_pt: float = 30.0  # each back-and-forth leg at least this wide (rejects overshoot fixes)
+    underline_min_reversals: int = 1  # direction changes needed (1 = there and back)
+    underline_band_pt: float = 12.0  # robust line fit: points within this vertical distance are on the underline
+    underline_max_slope: float = 0.25  # steepest underline considered (dy/dx, ~14°)
+    underline_max_gap_pts: int = 6  # resampled outlier points tolerated inside the underline before it is cut
+
     # caption
     caption_hide_delay_s: float = 2.0
     # Use a fake audio processor that emits placeholder words (to exercise the caption before real STT).
