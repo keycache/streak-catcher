@@ -14,3 +14,5 @@ captures/
 
 .DS_Store
 Thumbs.db
+# Temporary files (scratch scripts, data, fixtures, logs)
+.tmp/

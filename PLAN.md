@@ -16,8 +16,12 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 - Keep testing **minimal**: just enough to confirm the basic core workflow works (hold the combo → streak + screenshots + audio → release → session folder with frames and `audio.wav`).
 - If there are issues and the app still doesn't work after multiple changes, add `print` statements to debug the underlying issue. Include the necessary information: thread name, timestamps, key codes, display IDs, file paths, queue sizes, permission state, and exceptions with tracebacks.
 - Do **not** create summary files when a phase is completed.
-- The **only** two Markdown files are `PLAN.md` and `SPECIFICATIONS.md`.
-- All other files created are Python code files.
+- When reporting a completed phase in chat, don't list the code changes. Instead include a **"How to test"** section: what the user can verify by hand, with step-by-step instructions (commands, what to click or press, expected result). If nothing in the phase can be tested by hand, say so explicitly.
+- The **only** Markdown files are `PLAN.md`, `SPECIFICATIONS.md`, and `docs/LEARNINGS.md`.
+- Record non-obvious technical gotchas (surprising library, macOS, or tooling behavior) in `docs/LEARNINGS.md` (What / Why / Fix / Avoid next time). Do **not** record plan or documentation mismatches (stale checkboxes, outdated paths, bookkeeping); just fix those in place.
+- All other files created are Python code files (temporary files in `.tmp/` are the exception).
+- Run Python with `uv run` (e.g. `uv run main.py`, `uv run .tmp/scripts/check.py`), not `.venv/bin/python`.
+- Put every temporary file (scratch scripts, test data, fixtures, logs) under `.tmp/` in the project root, never in `/tmp` or elsewhere in the repo. Use subfolders as needed: `.tmp/scripts/`, `.tmp/data/`, `.tmp/fixtures/`, `.tmp/logs/`. `.tmp/` is git-ignored.
 
 ---
 
@@ -27,7 +31,7 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 |---|---|
 | Location | Modules live directly in the repo root (`./`). No `streak_catcher/` package folder |
 | Environment | Existing root uv venv (`.venv`, Python 3.14). Dependencies go in the root `pyproject.toml` |
-| Run mode | Python script: `.venv/bin/python main.py`. Permissions are granted to Terminal or VS Code |
+| Run mode | Python script: `uv run main.py`. Permissions are granted to Terminal or VS Code |
 | Menu bar | Pure PyObjC `NSStatusBar`, accessory app (no Dock icon) |
 | Menu items | Enable/Disable hotkey, Open captures folder, Show last transcript, Quit |
 | Hotkey | `pynput`. Left Ctrl + Left Shift + Left Option held; other modifiers ignored |
@@ -51,16 +55,16 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 - [x] Create the root files: `main.py` (entry point) and `config.py`.
 - [x] Add `captures/` to `.gitignore`.
 
-**Done when:** `.venv/bin/python main.py` starts and exits cleanly, printing the config.
+**Done when:** `uv run main.py` starts and exits cleanly, printing the config.
 
 ## Phase 1: Menu bar app shell and permissions
 
 **Goal:** a status bar icon with a working menu and no Dock icon.
 
-- [ ] `app.py`: `NSApplication` with the accessory activation policy, `AppDelegate`, and an `NSStatusItem` using the SF Symbol `sparkles`.
-- [ ] Menu items: Enable/Disable hotkey (checkmark state), Open captures folder, Show last transcript (`NSAlert`), Quit.
-- [ ] `permissions.py`: check and request Accessibility, Screen Recording, and Microphone. Print the status of each at startup.
-- [ ] Ctrl+C in the terminal quits cleanly (`AppHelper.runEventLoop(installInterrupt=True)`).
+- [x] `app.py`: `NSApplication` with the accessory activation policy, `AppDelegate`, and an `NSStatusItem` using the SF Symbol `sparkles`.
+- [x] Menu items: Enable/Disable hotkey (checkmark state), Open captures folder, Show last transcript (`NSAlert`), Quit.
+- [x] `permissions.py`: check and request Accessibility, Screen Recording, and Microphone. Print the status of each at startup.
+- [x] Ctrl+C in the terminal quits cleanly (`AppHelper.installMachInterrupt()` before `AppHelper.runEventLoop()`; `installInterrupt=True` is skipped when `NSApp` already exists).
 
 **Done when:** the icon appears, each menu item works, and Quit and Ctrl+C both exit.
 

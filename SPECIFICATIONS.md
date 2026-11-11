@@ -8,8 +8,12 @@ Companion to [PLAN.md](./PLAN.md). This document describes how each part is buil
 
 - If there are issues and the app still doesn't work after multiple changes, add `print` statements to debug the underlying issue. Include the necessary information: thread name, timestamps, key codes, display IDs, file paths, queue sizes, permission state, and exceptions with tracebacks.
 - Do **not** create summary files when a phase is completed.
-- The **only** two Markdown files are `PLAN.md` and `SPECIFICATIONS.md`.
-- All other files created are Python code files.
+- When reporting a completed phase in chat, don't list the code changes. Instead include a **"How to test"** section: what the user can verify by hand, with step-by-step instructions (commands, what to click or press, expected result). If nothing in the phase can be tested by hand, say so explicitly.
+- The **only** Markdown files are `PLAN.md`, `SPECIFICATIONS.md`, and `docs/LEARNINGS.md`.
+- Record non-obvious technical gotchas (surprising library, macOS, or tooling behavior) in `docs/LEARNINGS.md` (What / Why / Fix / Avoid next time). Do **not** record plan or documentation mismatches (stale checkboxes, outdated paths, bookkeeping); just fix those in place.
+- All other files created are Python code files (temporary files in `.tmp/` are the exception).
+- Run Python with `uv run` (e.g. `uv run main.py`, `uv run .tmp/scripts/check.py`), not `.venv/bin/python`.
+- Put every temporary file (scratch scripts, test data, fixtures, logs) under `.tmp/` in the project root, never in `/tmp` or elsewhere in the repo. Use subfolders as needed: `.tmp/scripts/`, `.tmp/data/`, `.tmp/fixtures/`, `.tmp/logs/`. `.tmp/` is git-ignored.
 
 ---
 
@@ -19,7 +23,7 @@ Companion to [PLAN.md](./PLAN.md). This document describes how each part is buil
 |---|---|
 | OS | macOS 26.6.2 (Apple Silicon). Minimum supported: macOS 13 |
 | Python | 3.14 (root uv venv at `./.venv`) |
-| Run | `.venv/bin/python main.py` (from the repo root) |
+| Run | `uv run main.py` (from the repo root) |
 | Dependencies (root `pyproject.toml`) | `pyaudio`, `pynput` (1.8.x), `pyobjc-framework-Cocoa`, `pyobjc-framework-Quartz` (13.x), `numpy` |
 | Not imported at startup | `torch`, `nemo`. These come with the `asr` module, which will be provided later and is only loaded when real STT is added (Phase 8) |
 
@@ -40,7 +44,7 @@ All modules live directly in the repo root (no `streak_catcher/` package folder)
 ├── PLAN.md
 ├── SPECIFICATIONS.md
 ├── pyproject.toml
-├── main.py              # entry point: python main.py
+├── main.py              # entry point: uv run main.py
 ├── config.py            # all constants (frozen dataclass)
 ├── log.py               # timestamped, thread-aware print helper
 ├── app.py               # NSApplication, AppDelegate, status item + menu
@@ -314,7 +318,7 @@ class AudioProcessor:
 | — | separator |
 | Quit Streak Catcher | `controller.stop("quit")`, stop the hotkey listener and workers, terminate PyAudio, then `NSApp.terminate_(None)` |
 
-- Event loop: `AppHelper.runEventLoop(installInterrupt=True)`, so Ctrl+C in the terminal goes through the same clean shutdown.
+- Event loop: `AppHelper.installMachInterrupt()` then `AppHelper.runEventLoop()`, so Ctrl+C in the terminal goes through the same clean shutdown. (`runEventLoop(installInterrupt=True)` silently skips installing the handler when `NSApp` was created beforehand, which it is, to set the activation policy.)
 
 ### Caption panel (`caption.py`)
 
