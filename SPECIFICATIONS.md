@@ -12,6 +12,7 @@ Companion to [PLAN.md](./PLAN.md). This document describes how each part is buil
 - The **only** Markdown files are `PLAN.md`, `SPECIFICATIONS.md`, and `docs/LEARNINGS.md`.
 - Record non-obvious technical gotchas (surprising library, macOS, or tooling behavior) in `docs/LEARNINGS.md` (What / Why / Fix / Avoid next time). Do **not** record plan or documentation mismatches (stale checkboxes, outdated paths, bookkeeping); just fix those in place.
 - All other files created are Python code files (temporary files in `.tmp/` are the exception).
+- Prefer a `config.py` field over a hardcoded value for anything tunable (thresholds, timeouts, sizes, model names), with a sensible default.
 - Run Python with `uv run` (e.g. `uv run main.py`, `uv run .tmp/scripts/check.py`), not `.venv/bin/python`.
 - Put every temporary file (scratch scripts, test data, fixtures, logs) under `.tmp/` in the project root, never in `/tmp` or elsewhere in the repo. Use subfolders as needed: `.tmp/scripts/`, `.tmp/data/`, `.tmp/fixtures/`, `.tmp/logs/`. `.tmp/` is git-ignored.
 
@@ -25,7 +26,7 @@ Companion to [PLAN.md](./PLAN.md). This document describes how each part is buil
 | Python | 3.14 (root uv venv at `./.venv`) |
 | Run | `uv run main.py` (from the repo root) |
 | Dependencies (root `pyproject.toml`) | `pyaudio`, `pynput` (1.8.x), `pyobjc-framework-Cocoa`, `pyobjc-framework-Quartz` (13.x), `numpy` |
-| Not imported at startup | `torch`, `nemo`. These come with the `asr` module (see §10, Phase 8 integration) and are only loaded when real STT is added |
+| ASR | `cactus-compute` (Whistle, 16 MB model) runs in-process from Phase 8 (see §17.1). torch and NeMo are not used |
 
 Dependencies are added with `uv add`. If the `asr` module later brings torch and NeMo, declare them in `pyproject.toml` too, so a `uv sync` doesn't remove them.
 
@@ -298,7 +299,7 @@ def process_image(frame: CapturedFrame) -> None:
 
 ```python
 class AudioProcessor:
-    """Real-time audio processing; will wrap asr/main.py (Parakeet) in Phase 8."""
+    """Real-time audio processing; replaced by CactusProcessor (cactus Whistle) in Phase 8."""
     def start_session(self, session: Session) -> None: ...
     def process_chunk(self, chunk: AudioChunk) -> str | None:
         return None            # later: partial/final transcript text
@@ -308,30 +309,7 @@ class AudioProcessor:
 
 `AudioProcessingWorker`: a daemon thread with `queue.Queue(maxsize=100)` (10 s of audio). It handles three kinds of messages: `("start", session)`, `("chunk", AudioChunk)`, and `("end", None)`. Any non-`None` text is sent to the main thread with `callAfter(controller.on_transcript, text, is_final)`.
 
-**Phase 8 integration** (not built yet). The `asr` module was provided by the user as a reference script:
-
-| Item | Value |
-|---|---|
-| Location | `/Users/akashpatki/Documents/kash/code/test/asr/main.py`, run there as `uv run asr/main.py` |
-| Environment | Its own uv venv at `/Users/akashpatki/Documents/kash/code/test/.venv` (`torch` 2.15.0, `nemo_toolkit` 3.0.0, `omegaconf` 2.3.0). This repo's venv has none of these |
-| Models | `MODELS = {"tdt": "nvidia/parakeet-tdt-0.6b-v3", "ctc": "nvidia/parakeet-ctc-1.1b"}`, default `tdt` (multilingual, punctuated) |
-| Device | `cuda`, then `mps`, then `cpu` |
-| API used | `load_model(name)` (from_pretrained, `.to(DEVICE)`, `.eval()`, switches greedy to `greedy_batch`); `transcribe(model, float32_16k_mono) -> str`; `to_float(bytes)`; `rms(chunk)` |
-| Audio contract | `SAMPLE_RATE = 16000`, `CHUNK_SIZE = 1600`, `to_float` = int16 / 32768. **Matches** `config.py` and `AudioChunk.samples` |
-| VAD constants | `MIN_SPEECH_RMS = 0.01`, `NOISE_MULTIPLIER = 3.0`, `CALIBRATION_CHUNKS = 10`, `PREROLL_CHUNKS = 3`, `SILENCE_CHUNKS = 8`, `PARTIAL_EVERY = 5`, `MAX_UTTERANCE_CHUNKS = 150` |
-
-`listen()` owns its own PyAudio stream, so it can't be called directly. `AudioProcessor` re-implements its loop over incoming `AudioChunk`s:
-
-- `start_session`: reset pre-roll, utterance, and counters.
-- `process_chunk`: VAD with the speech threshold, pre-roll of 3 chunks. Every 5 speech chunks, return a partial transcript (`is_final=False`). After 8 silent chunks or 150 chunks, return the final text for the utterance.
-- `end_session`: transcribe whatever is buffered and return it as final, since push-to-talk sessions usually end mid-utterance.
-
-Decisions to make when Phase 8 starts:
-
-- **Environment:** either add `torch` + `nemo_toolkit[asr]` to this repo's `pyproject.toml` (several GB), or run `asr` as a separate process from the `test` venv and stream chunks to it over a pipe or socket. The second option keeps this app light and starts fast.
-- **Calibration:** `listen()` measures 1 s of silence at startup. In a push-to-talk session the user usually speaks immediately, so calibrate once at app start (or from the idle mic between sessions), or use the fixed `MIN_SPEECH_RMS` floor.
-- **Model load:** load lazily on a background thread at app start (it takes seconds), and show "Loading model…" in the caption until it's ready.
-- **Latency:** `transcribe` runs on the `audio-worker` thread. If it's slower than real time, the bounded queue drops the oldest chunks (logged).
+**Phase 8** replaces this stub with an in-process cactus `Whistle.stream()` processor; see §17.1.
 
 ## 11. Menu bar and caption UI
 
@@ -389,6 +367,8 @@ captures/
 
 `captures/` is added to `.gitignore`.
 
+From Phases 9–11 each session folder also gets `path.json` (cursor path), `frames.json` (frame triggers and dedup), `context_N.jpg` (annotated overviews), and `request.json` (the assembled LLM request). See §17.
+
 ## 14. Logging and debugging (`log.py`)
 
 ```python
@@ -428,3 +408,94 @@ def log(component: str, msg: str, *, debug: bool = False) -> None
 10. Open Captures Folder opens Finder. Show Last Transcript shows an alert.
 11. Quit and Ctrl+C both exit cleanly with no hanging threads, and the mic indicator turns off.
 12. A 60 s hold uses stable memory and the queues don't overflow.
+
+## 17. Phases 8–13 design (agreed, not built)
+
+### 17.1 Real-time ASR with cactus Whistle (Phase 8)
+
+Engine: `cactus-compute` 4.1.0 (`cactus.agent.whistle.Whistle`), following the user's reference streaming script. Dependencies are only `huggingface_hub` and `Pillow`. The model (`Cactus-Compute/whistle`, `whistle.cact`, 16 MB) and native runtime wheel are fetched from Hugging Face on first use and cached in `~/.cache/huggingface/hub`. It runs **in-process**.
+
+Measured on this Mac (synthetic 3.4 s sentence, 1 s chunks): import ~50 ms, `Whistle()` load ~280 ms, `stream()` pass 16–30 ms per chunk, tail committed ~100 ms after the last chunk, transcript word-perfect.
+
+| API | Behavior |
+|---|---|
+| `Whistle(weights=None)` | Loads weights (downloads on first use). Calls are serialized across threads |
+| `transcribe(samples, language, keywords, word_timestamps)` | Batch; returns `text`, `language`, `ttft_ms`, `decode_tps`, plus `words` |
+| `stream(chunks, language, keywords)` | Generator over ~1 s float32 16 kHz chunks. Yields one dict per chunk with committed `text` and `words` (`word`, `start`, `end`, `probability`; seconds from stream start), the unconfirmed `pending` tail, `language`, `received`, `pass_ms`. When the chunk iterator ends, it yields the committed tail. Holds a process-wide lock for its whole duration |
+
+- **Telemetry:** cactus sends anonymous usage counts (function name, version, OS; no audio or text) unless `CACTUS_TELEMETRY=0`. The app sets it from `cactus_telemetry` (`False`) **before importing cactus**.
+- **Preload:** at app start, a background thread creates `Whistle()` and runs a short warm-up `transcribe`. A disabled menu line shows "Loading speech model…", then "Speech model ready", or "Speech model unavailable" (error logged).
+- **`CactusProcessor`** (replaces the `AudioProcessor` stub, on the `audio-worker` thread): per session segment, one `stream()` over a generator that regroups the recorder's 100 ms chunks into `asr_chunk_s` chunks. The `end` message ends the generator, so the tail commits. Each yielded step sends `on_transcript(committed + pending, is_final=False)`. The final message carries the joined committed text and all words.
+- **Clock:** word times are relative to the segment's first audio sample. Add the recorder's start offset (`t_offset_s` of chunk 1) to put them on the session clock shared with gestures and frames.
+- **Before ready:** sessions are allowed. Chunks queue in the worker and are streamed once the model has loaded.
+- **Caption:** committed text in white, the `pending` tail dimmed, updated about every 1 s.
+
+### 17.2 Cursor path and gestures (Phase 9)
+
+- The streak sampler already reads the cursor at 120 Hz. Each sample `(t, x, y)` (session-relative seconds, global Cocoa coordinates) is also appended to the session path and saved as `path.json`.
+- **Strokes:** split the path at pauses (speed below `gesture_pause_speed_pt_s` for at least `gesture_pause_s`).
+- **Circle:** the stroke closes (end-to-start distance ≤ `circle_close_ratio` × bounding-box diagonal), cumulative signed turning reaches about ±360° (≥ `circle_min_turn_deg`), the bounding-box aspect ratio is within `circle_max_aspect`, and the size is at least `gesture_min_size_pt`.
+- **Underline:** mostly horizontal (vertical extent ≤ `underline_max_dy_ratio` × horizontal extent) with **at least `underline_min_reversals` direction reversals** (↔ back-and-forth), and width ≥ `underline_min_dx_pt`. A single horizontal sweep is treated as cursor travel.
+- Only circle and underline are supported. The overlay can't take clicks, so there is no free drawing.
+- Output: `Gesture(index, kind, t_start, t_end, bbox_global)`, numbered in time order within the session.
+- Thresholds are tuned by replaying recorded `path.json` files through a check script.
+
+### 17.3 Event-driven capture (Phase 10)
+
+- **Clean frames:** overlay windows get `setSharingType_(NSWindowSharingNone)`, so the streak is not captured. Annotations are drawn by the app later.
+- **Rolling buffer:** the capturer keeps grabbing every `frame_buffer_interval_s` but keeps only the last `frame_buffer_s` seconds as encoded JPEG bytes **in memory** (about 4 MB). Nothing is written until a frame is chosen.
+- **Persist triggers:** session start; gesture start (the buffered frame just before `t_start`); gesture end; frontmost-app change (`NSWorkspaceDidActivateApplicationNotification`); release; and a safety net every `safety_net_interval_s` (2 s).
+- **Dedup (changed area):** downscale both frames to grayscale `dedup_thumb_width` px wide and count the pixels whose difference exceeds `dedup_pixel_delta`. If changed area < `dedup_changed_pct`% of the frame, they are duplicates. Safety-net and app-switch frames can be dropped as duplicates. **Gesture frames are only merged** (they keep their gesture refs) and never dropped.
+- `frames.json`: per frame, the trigger, `t`, frontmost app, gesture indices, and the duplicate-of reference.
+
+### 17.4 Contexts, annotation, and request assembly (Phase 11)
+
+- **Context = a group of visually similar frames** (same changed-area metric). This never misplaces a box after scrolling, and returning to an earlier screen merges into its context. App switches are capture triggers, not grouping keys.
+- **One annotated overview per context, no crops.** Draw a numbered box `[n]` for each gesture in that context on the context's representative frame (gesture-start frames preferred).
+- **Markers:** insert `[n]` into the final transcript at gesture `n`'s time, using word timestamps (after the word nearest `t_start`).
+- **Concurrency:** on release, the image job (dedup, contexts, annotation) starts immediately on a worker thread. Assembly waits for the final transcript up to `assembly_timeout_s` (caption: "Transcribing…"), or up to `model_wait_timeout_s` if the model is still loading (caption: "Waiting for speech model…"). On timeout it uses the committed text so far (logged). Neither blocks the next session.
+- **Edge cases:**
+  - Speech and no gestures: the images are the unique (deduped) frames from start, release, app switches, and the safety net, without boxes.
+  - Gestures and no speech (empty transcript): nothing is sent; a brief caption "No instructions heard" (~1.5 s).
+  - Neither: nothing is sent.
+- **Image cap:** `max_images` (`None` = no cap). When over the cap, keep the first or last contexts per `truncate_keep` (`"start"` / `"end"`).
+- Saved per session: `request.json` (transcript with markers, image list, context map) and `context_N.jpg`.
+
+### 17.5 LLM provider and response (Phases 12–13)
+
+```python
+class LLMProvider(Protocol):
+    def respond(self, request: LLMRequest) -> str: ...   # text with [n] markers + annotated image paths
+```
+
+- Chosen by `llm_provider`. The first implementation is **`CopilotProvider`** (PyPI `github-copilot-sdk`, Python 3.11+). The SDK runs the **GitHub Copilot CLI** (`copilot`) in server mode and reuses its credentials (`copilot auth login`, or `COPILOT_GITHUB_TOKEN`). `copilot_cli_path` covers a CLI that isn't on PATH.
+- Images are supported as **file attachments by absolute path**:
+  ```python
+  client = CopilotClient(); await client.start()              # once, at app launch
+  session = await client.create_session(model=cfg.llm_model)  # per request
+  response = await session.send(prompt, attachments=[{"type": "file", "path": "/abs/context_1.jpg"}, ...])
+  ```
+- The client lives on a dedicated asyncio thread. Each request uses a new session (no memory across sessions), with timeout `llm_timeout_s`. Errors are shown in the response panel.
+- The prompt template explains that `[n]` in the text refers to numbered box `n` in the attached images.
+- **Response panel** (`response_panel.py`): dark HUD style like the caption, bottom-center of the session's screen, replacing the caption. Width `min(response_max_width_pt, response_width_fraction × visibleFrame.width)`. Height grows with the text up to `response_max_height_fraction` × visibleFrame height, then an `NSScrollView` scrolls. Markdown is rendered through `NSAttributedString` when `response_markdown` is set. It has **Copy** and **✕** buttons, accepts mouse events but is non-activating (the user's app keeps focus), and is excluded from screenshots (`NSWindowSharingNone`). It is dismissed by ✕, Esc (detected by the existing pynput listener, since the panel never has focus), the next session, or `response_auto_dismiss_s` if set. It shows "Thinking…" while waiting.
+
+### 17.6 Config additions (defaults; tune from real sessions)
+
+| Key | Default | Purpose |
+|---|---|---|
+| `cactus_telemetry` | `False` | Sets `CACTUS_TELEMETRY` before importing cactus |
+| `asr_language` | `"en"` | `None` = auto-detect (en, de, fr, es, it, nl, pl) |
+| `asr_keywords` | `()` | Keyword biasing for UI and app terms |
+| `asr_chunk_s` | `1.0` | Chunk length fed to `stream()` |
+| `gesture_pause_s` / `gesture_pause_speed_pt_s` | `0.15` / `60` | Stroke segmentation |
+| `gesture_min_size_pt` | `30` | Ignore tiny strokes |
+| `circle_min_turn_deg` / `circle_close_ratio` / `circle_max_aspect` | `300` / `0.35` / `3.0` | Circle detection (closure relative to bbox diagonal) |
+| `underline_max_dy_ratio` / `underline_min_dx_pt` / `underline_min_reversals` | `0.3` / `60` / `1` | Underline (↔) detection |
+| `frame_buffer_interval_s` / `frame_buffer_s` | `0.5` / `4.0` | Rolling in-memory frame buffer |
+| `safety_net_interval_s` | `2.0` | Periodic safety-net capture |
+| `dedup_thumb_width` / `dedup_pixel_delta` / `dedup_changed_pct` | `256` / `24` / `3.0` | Changed-area duplicate and context test |
+| `max_images` / `truncate_keep` | `None` / `"end"` | Image cap and which end to keep |
+| `assembly_timeout_s` / `model_wait_timeout_s` | `5.0` / `60.0` | Wait for the final transcript, or for the model to load |
+| `llm_provider` / `llm_model` / `llm_timeout_s` / `copilot_cli_path` | `"copilot"` / `"gpt-5.4"` / `60.0` / `None` | LLM |
+| `response_max_width_pt` / `response_width_fraction` / `response_max_height_fraction` | `900` / `0.7` / `0.5` | Response panel size |
+| `response_markdown` / `response_auto_dismiss_s` | `True` / `None` | Response rendering and dismissal |

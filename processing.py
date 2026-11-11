@@ -63,7 +63,7 @@ class ImageProcessingWorker(_BoundedWorker):
 
 
 class AudioProcessor:
-    """Real-time audio processing; will wrap the asr module (Parakeet) in Phase 8."""
+    """Real-time audio processing stub; replaced by a cactus Whistle processor in Phase 8."""
 
     def start_session(self, session) -> None:
         return None

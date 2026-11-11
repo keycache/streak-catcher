@@ -20,6 +20,7 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 - The **only** Markdown files are `PLAN.md`, `SPECIFICATIONS.md`, and `docs/LEARNINGS.md`.
 - Record non-obvious technical gotchas (surprising library, macOS, or tooling behavior) in `docs/LEARNINGS.md` (What / Why / Fix / Avoid next time). Do **not** record plan or documentation mismatches (stale checkboxes, outdated paths, bookkeeping); just fix those in place.
 - All other files created are Python code files (temporary files in `.tmp/` are the exception).
+- Prefer a `config.py` field over a hardcoded value for anything tunable (thresholds, timeouts, sizes, model names), with a sensible default.
 - Run Python with `uv run` (e.g. `uv run main.py`, `uv run .tmp/scripts/check.py`), not `.venv/bin/python`.
 - Put every temporary file (scratch scripts, test data, fixtures, logs) under `.tmp/` in the project root, never in `/tmp` or elsewhere in the repo. Use subfolders as needed: `.tmp/scripts/`, `.tmp/data/`, `.tmp/fixtures/`, `.tmp/logs/`. `.tmp/` is git-ignored.
 
@@ -35,12 +36,15 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 | Menu bar | Pure PyObjC `NSStatusBar`, accessory app (no Dock icon) |
 | Menu items | Enable/Disable hotkey, Open captures folder, Show last transcript, Quit |
 | Hotkey | `pynput`. Left Ctrl + Left Shift + Left Option held; other modifiers ignored |
-| Streak | White/cyan glow, short fade (~250 ms), visible in screenshots |
+| Streak | White/cyan glow, short fade (`streak_fade_s`). Visible in screenshots until Phase 10, which switches to clean frames with app-drawn annotations |
 | Capture | Quartz `CGDisplayCreateImage`, display where the combo started (fixed), every 500 ms whether or not the mouse moves |
 | Images | JPEG (quality 0.85, half Retina size via `capture_scale = 0.5`, ~500 KB per frame) saved to a per-session folder, then passed to a per-image background worker. A restart within `session_reuse_window_s` (default 10 s) of the previous stop continues the same folder |
 | Audio | PyAudio, 16 kHz, mono, int16 → float32, 1600-sample (100 ms) chunks (the format the `asr` module expects) |
 | Audio save | Session audio is also saved as `audio.wav` |
-| STT | Engine comes from the user's `asr` script (Parakeet TDT 0.6B v3 via NeMo, at `~/Documents/kash/code/test/asr/main.py`). Stub until Phase 8 |
+| STT | `cactus-compute` Whistle (16 MB model), run in-process and preloaded at app start (~0.3 s load). `stream()` over ~1 s chunks gives live committed and pending text and word timestamps. Telemetry off. Replaces the earlier Parakeet/NeMo plan (Phase 8) |
+| Gestures | Detected from the recorded cursor path (not image processing). Circle and back-and-forth underline only (Phase 9) |
+| LLM input | One annotated overview per visual context with numbered boxes, plus a transcript with `[n]` markers. No crops. Image cap configurable (Phase 11) |
+| LLM | Switchable provider interface. GitHub Copilot SDK first. Response shown in a dismissable panel (Phases 12–13) |
 | Transcript UI | Floating caption panel at the bottom of the screen |
 | Tests | Minimal. Only check that the basic core workflow works (see Working rules) |
 
@@ -136,8 +140,111 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 
 **Done when:** every item on the checklist passes.
 
-## Phase 8 (future): Real transcription and image analysis
+## Phases 8–13: Real transcription, gestures, and LLM (design agreed, not started)
 
-- [ ] Replace the `AudioProcessor` stub with the `asr` logic (`load_model`, `transcribe`, plus the VAD, pre-roll, and partial-transcript loop from `listen()`). Reference script: `/Users/akashpatki/Documents/kash/code/test/asr/main.py` (own uv venv with torch and NeMo). See the Specification, §10, for the API, constants, and open decisions (environment, calibration, model load).
-- [ ] Load the model lazily at app start on a background thread.
-- [ ] Implement real logic in `process_image`.
+Design details are in the Specification, §17. Summary of the flow: while the combo is held, audio is transcribed live in-process by cactus `Whistle.stream()` (committed and pending text in the caption), the cursor path is recorded and checked for **circle** and **underline** gestures, and frames are captured on events (not only on a timer). On release, the image job starts immediately while the transcript finishes in the background. Frames are grouped into **contexts** (visually similar frames), each rendered as one annotated overview with numbered boxes, and the transcript gets matching `[1]`, `[2]` markers. The result goes to a switchable LLM provider (GitHub Copilot SDK first), and the answer appears in a dismissable panel.
+
+**Copilot SDK and images:** confirmed. `session.send(prompt, attachments=[{"type": "file", "path": "/abs/path.png"}])` accepts image files, so the annotated context images from Phase 11 are attached by path.
+
+**Tunable values live in `config.py`, not in code.** Defaults are listed under [Resolved decisions](#resolved-decisions-phases-813) and are expected to be tuned from real sessions.
+
+## Phase 8: Real-time transcription with cactus (Whistle) and model preload
+
+**Goal:** fast, lightweight live transcription with word timestamps, ready seconds after launch.
+
+ASR engine: **`cactus-compute`** (`cactus.agent.whistle.Whistle`), following the user's reference streaming script. The model is a 16 MB `whistle.cact` file plus a small native runtime, both fetched from Hugging Face on first use and cached in `~/.cache/huggingface/hub`. It runs **in-process**; no torch or NeMo, no worker process. Measured on this Mac:
+
+| | |
+|---|---|
+| Import + model load | ~50 ms + ~280 ms |
+| `stream()` pass per 1 s chunk of speech | 16–30 ms |
+| Tail committed after audio ends | ~100 ms |
+| Output per chunk | committed `text` + `words` (`word`, `start`, `end`, `probability`; seconds from stream start), unconfirmed `pending` tail, `language`, `received`, `pass_ms` |
+
+- [ ] `uv add cactus-compute`. Set `CACTUS_TELEMETRY=0` before import (the package sends anonymous usage counts by default; config `cactus_telemetry = False`).
+- [ ] Preload at app start on a background thread: create `Whistle()` (downloads weights on first run) and run one short warm-up `transcribe`. A disabled menu line shows "Loading speech model…", then "Speech model ready", or "Speech model unavailable" with the error logged.
+- [ ] Replace the `AudioProcessor` stub with a `CactusProcessor` on the `audio-worker` thread. Per session segment it runs one `Whistle.stream()` over a generator that **regroups the recorder's 100 ms chunks into ~1 s chunks**. The generator ends on the session's `end` message, which makes cactus commit the pending tail.
+- [ ] Caption shows committed text plus the dimmed `pending` tail, updated every ~1 s. The final transcript is the committed texts joined with spaces.
+- [ ] Word times are relative to the segment's audio start. Convert them to session time (add the recorder's start offset) so gestures and words share one clock.
+- [ ] Sessions before the model is ready are allowed: chunks queue (bounded) and are streamed once the model is loaded.
+- [ ] Config: `asr_language` (`"en"`; `None` = auto-detect among en/de/fr/es/it/nl/pl), `asr_keywords` (words or phrases for keyword biasing, empty by default), `asr_chunk_s` (1.0). `stream()` holds a process-wide lock, so only one stream runs at a time; sessions are sequential, so this is fine.
+
+**Done when:** the menu line goes from loading to ready within about a second of launch (after the first-run download), speech shows live committed and pending text in the caption, and the final transcript has word timestamps on the session clock.
+
+## Phase 9: Cursor path recording and gesture detection
+
+**Goal:** know when the user circled or underlined something, and where.
+
+- [ ] Record the cursor path for each session `(t, x, y)` from the streak sampler (120 Hz) and save it as `path.json` in the session folder (also used to tune thresholds).
+- [ ] Segment the path into strokes at pauses: speed below `gesture_pause_speed_pt_s` for at least `gesture_pause_s`.
+- [ ] Classify strokes (all thresholds in config): **circle**: cumulative turning ≥ `circle_min_turn_deg`, end-to-start distance ≤ `circle_close_ratio` × bounding-box diagonal, aspect ≤ `circle_max_aspect`, size ≥ `gesture_min_size_pt`. **Underline**: vertical extent ≤ `underline_max_dy_ratio` × horizontal extent, width ≥ `underline_min_dx_pt`, at least `underline_min_reversals` direction reversals (↔). Everything else is ordinary cursor movement and is ignored.
+- [ ] Emit `Gesture(index, kind, t_start, t_end, bbox)` events during the session.
+- [ ] `.tmp/scripts` replay check: recorded paths go in, the expected gestures come out.
+
+**Done when:** deliberate circles and ↔ underlines are detected with correct bounding boxes and times, and normal cursor travel (including fast horizontal moves) produces no gestures.
+
+## Phase 10: Event-driven frame capture
+
+**Goal:** few frames, but the right ones.
+
+- [ ] Clean frames: exclude the streak overlay windows from capture (`NSWindowSharingNone`). The app draws its own annotations later.
+- [ ] Rolling in-memory buffer: capture every `frame_buffer_interval_s` and keep the last `frame_buffer_s` seconds as encoded JPEG bytes. Nothing is written to disk until a frame is chosen.
+- [ ] Triggers that persist a frame: session start, gesture start (the buffered frame just before `t_start`), gesture end, frontmost-app switch (`NSWorkspace` activation notification), release, and a safety net every `safety_net_interval_s`.
+- [ ] Dedup by **changed area**: grayscale thumbnails `dedup_thumb_width` px wide; a pixel counts as changed when it differs by more than `dedup_pixel_delta`; frames are duplicates when less than `dedup_changed_pct`% of pixels changed. Safety-net frames can be dropped; gesture frames are only merged, never dropped.
+- [ ] Write `frames.json` (frame → trigger, time, app, gesture refs).
+
+**Done when:** a 10 s session with two gestures and one app switch leaves only a handful of frames on disk, none of them near-duplicates, and the gesture frames show the screen as it was when each gesture began.
+
+## Phase 11: Contexts, annotation, and request assembly
+
+**Goal:** the smallest input that still carries everything the LLM needs.
+
+- [ ] Group frames into **contexts** by visual similarity (the same changed-area metric). Returning to a screen merges into its context.
+- [ ] Render one **annotated overview per context**: numbered bounding boxes for every gesture in that context, drawn on that context's frame. No crops.
+- [ ] Insert `[n]` markers into the transcript at each gesture's time, using word timestamps.
+- [ ] On release, start the image job immediately and wait for the final transcript for up to `assembly_timeout_s`, with the caption showing "Transcribing…". If the model is still loading, wait up to `model_wait_timeout_s` ("Waiting for speech model…"). On timeout, use the text committed so far and log it. Transcription never blocks capture or the next session.
+- [ ] Edge cases: talking with no gestures sends the unique deduped frames. Gestures with no speech show a brief caption "No instructions heard" and nothing is sent.
+- [ ] `max_images` (`None` = no cap) and `truncate_keep` (`"end"` by default, keeping the most recent contexts; or `"start"`).
+- [ ] Save the assembled request (`request.json` plus the annotated images) in the session folder for debugging.
+
+**Done when:** sample sessions produce the expected contexts, boxes, and markers, and a gesture-only session exits gracefully.
+
+## Phase 12: LLM provider interface
+
+**Goal:** send the request and get text back, with a provider that can be switched.
+
+- [ ] Prerequisites: `uv add github-copilot-sdk` (Python 3.11+). Install the GitHub Copilot CLI (`copilot`), which the SDK runs in server mode, and run `copilot auth login` once. The SDK reuses those credentials (or `COPILOT_GITHUB_TOKEN`).
+- [ ] `llm.py`: an `LLMProvider` interface (`respond(request) -> str`), with the implementation chosen by `llm_provider`.
+- [ ] `CopilotProvider`: one `CopilotClient` started at app launch on a dedicated asyncio thread. One `create_session(model=llm_model)` per request (no cross-session memory), then `session.send(prompt, attachments=[{"type": "file", "path": ...}])` with the annotated context images from Phase 11. Timeout `llm_timeout_s`. `copilot_cli_path` for a non-PATH CLI. Errors are shown in the response panel.
+- [ ] Prompt template that explains the numbered boxes and the `[n]` markers.
+
+**Done when:** a real session produces an LLM response using the Copilot provider, and switching the provider in config works.
+
+## Phase 13: Response panel
+
+**Goal:** show the answer.
+
+- [ ] `response_panel.py`: same dark HUD style as the caption, bottom-center of the session's screen, replacing the caption. Width `min(response_max_width_pt, response_width_fraction × screen)`. Grows with the text up to `response_max_height_fraction` of the screen, then scrolls.
+- [ ] Renders markdown (`response_markdown`; `NSAttributedString` markdown init). Has a **Copy** button and a **✕** button. Accepts mouse events, but is non-activating so the user's app keeps focus. Excluded from screenshots.
+- [ ] Dismissed by ✕, Esc (through the existing pynput listener, since the panel never takes focus), or the next session. Optional `response_auto_dismiss_s` (`None` = stays).
+- [ ] Shows "Thinking…" while waiting for the LLM, then the response text.
+
+**Done when:** responses are readable, long ones fit or scroll, and dismissing works.
+
+## Resolved decisions (Phases 8–13)
+
+All questions are answered. Every tunable value is a `config.py` field; the defaults below are starting points, to be tuned from real sessions (`path.json`, `frames.json`).
+
+| Topic | Decision | Config (default) |
+|---|---|---|
+| ASR | cactus Whistle in-process, telemetry off | `asr_language` (`"en"`), `asr_keywords` (`()`), `asr_chunk_s` (`1.0`), `cactus_telemetry` (`False`) |
+| Copilot images | Supported as file attachments by absolute path | — |
+| Strokes | Split at pauses | `gesture_pause_s` (`0.15`), `gesture_pause_speed_pt_s` (`60`), `gesture_min_size_pt` (`30`) |
+| Circle | Turning + closure + aspect | `circle_min_turn_deg` (`300`), `circle_close_ratio` (`0.35`), `circle_max_aspect` (`3.0`) |
+| Underline | Flat ↔ stroke with reversals | `underline_max_dy_ratio` (`0.3`), `underline_min_dx_pt` (`60`), `underline_min_reversals` (`1`) |
+| Rolling buffer | Keep the 500 ms cadence | `frame_buffer_interval_s` (`0.5`), `frame_buffer_s` (`4.0`), `safety_net_interval_s` (`2.0`) |
+| Dedup / contexts | Changed area on grayscale thumbnails | `dedup_thumb_width` (`256`), `dedup_pixel_delta` (`24`), `dedup_changed_pct` (`3.0`) |
+| Image cap | No cap; keep the most recent when capped | `max_images` (`None`), `truncate_keep` (`"end"`) |
+| Waiting for transcript | Caption shows status; fall back to committed text | `assembly_timeout_s` (`5.0`), `model_wait_timeout_s` (`60.0`) |
+| LLM | Copilot SDK, new session per request | `llm_provider` (`"copilot"`), `llm_model` (`"gpt-5.4"`), `llm_timeout_s` (`60.0`), `copilot_cli_path` (`None`) |
+| Response panel | Bottom-center, scrolls, markdown, Copy and ✕, Esc | `response_max_width_pt` (`900`), `response_width_fraction` (`0.7`), `response_max_height_fraction` (`0.5`), `response_markdown` (`True`), `response_auto_dismiss_s` (`None`) |
