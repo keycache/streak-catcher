@@ -10,7 +10,9 @@ from PyObjCTools import AppHelper
 from config import CONFIG
 from log import log, log_exc
 from audio_capture import AudioRecorder
+from assembly import Assembler
 from caption import CaptionPanel
+from collections import deque
 import gesture_debug
 from gestures import GestureDetector
 from processing import AudioProcessingWorker, AudioProcessor, FakeAudioProcessor, ImageProcessingWorker
@@ -76,7 +78,10 @@ class SessionController:
         self.caption = CaptionPanel()
         self.audio_worker.start()
         self.recorder = None
-        self.transcript: list[str] = []
+        self.partial_text: dict[str, str] = {}  # session id -> committed text so far (assembly timeout fallback)
+        self._assemblers: dict[str, deque] = {}  # session id -> assemblers waiting for their final transcript
+        self.last_request = None
+        self._first_gesture = 1
         self._watchdog = None
         self._timer_target = WatchdogTimerTarget.alloc().initWithCallback_(self._watchdog_tick)
         front = NSWorkspace.sharedWorkspace().frontmostApplication()
@@ -103,7 +108,8 @@ class SessionController:
         s = self.session
         how = f"continuing (segment {s.segment}, from frame {s.frame_count + 1})" if s.segment > 1 else "new"
         log("session", f"start {s.id} {how} display={s.display_id} folder={s.folder}")
-        self.detector = GestureDetector(self._on_gesture, first_index=len(s.gestures) + 1, config=self.cfg)
+        self._first_gesture = len(s.gestures) + 1
+        self.detector = GestureDetector(self._on_gesture, first_index=self._first_gesture, config=self.cfg)
         try:
             self.streak.start()
         except Exception:
@@ -112,7 +118,6 @@ class SessionController:
             self.caption.show(s.visible_frame, "Listening…")
         except Exception:
             log_exc("session", "caption failed to show")
-        self.transcript = []
         try:
             self.audio_worker.start_session(s)
             self.recorder = AudioRecorder(s, self.audio_worker.submit, self.cfg)
@@ -174,6 +179,12 @@ class SessionController:
         self._write_frames(s)
         if self.cfg.gesture_debug_images and s.gestures:
             gesture_debug.render_async(s, s.frames, self.cfg.jpeg_quality)
+        if reason != "quit":
+            seg = {"segment": s.segment, "first_gesture": self._first_gesture,
+                   "t0": s.segment_started_at - s.started_at, "t1": s.ended_at - s.started_at + 1.0}
+            asm = Assembler(self, s, seg, self.cfg)
+            self._assemblers.setdefault(s.id, deque()).append(asm)
+            asm.start()
         self.last_session, self.session = s, None
         log("session", f"stop {s.id} ({reason}): segment {s.segment} {s.ended_at - s.segment_started_at:.2f}s, "
                        f"{frames} frames ({s.frame_count} in folder), {chunks} audio chunks, {len(s.gestures)} gestures, "
@@ -238,16 +249,17 @@ class SessionController:
         log("transcr", f"{'final' if is_final else 'partial'}: {text}" + (f" […{pending}]" if pending else ""),
             debug=not is_final)
         stale = session is not None and self.session is not None and session is not self.session
+        s = session or self.session or self.last_session
         if not is_final:
+            if s is not None:
+                self.partial_text[s.id] = text
             if not stale:
                 self.caption.set_parts(text, pending)
             return
         if not stale:  # don't overwrite a newer session's caption
             self.caption.set_text(text or "No speech detected")
-        if text:
-            self.transcript.append(text)
-            self.delegate.last_transcript = " ".join(self.transcript)
-        s = session or self.session or self.last_session
+        if s is not None and self._assemblers.get(s.id):
+            self._assemblers[s.id].popleft().deliver(text, words)
         if s is not None and words is not None:
             s.words.extend(words)
             s.transcript_text = " ".join(t for t in (s.transcript_text, text) if t)
@@ -256,6 +268,23 @@ class SessionController:
                     {"session": s.id, "text": s.transcript_text, "words": s.words}, indent=1))
             except Exception:
                 log_exc("transcr", "writing transcript.json failed")
+
+    def on_request(self, request: dict) -> None:
+        """Main thread: an assembled request for one released segment (sent to the LLM in Phase 12)."""
+        self.last_request = request
+        if request["status"] == "no_speech":
+            log("assembly", "gestures but no instructions heard; nothing to send")
+            if self.session is None:
+                s = self.last_session
+                self.caption.show(s.visible_frame, "No instructions heard")
+                self.caption.hide_after(self.cfg.no_instructions_caption_s)
+            return
+        if self.session is None:  # re-hide after a "Transcribing…" status
+            self.caption.hide_after(self.cfg.caption_hide_delay_s)
+        if request["status"] == "empty":
+            return
+        self.delegate.last_transcript = request["transcript_with_markers"]
+        log("assembly", f"request ready: {len(request['images'])} image(s): {request['transcript_with_markers']!r}")
 
     def shutdown(self) -> None:
         self.stop("quit")

@@ -141,7 +141,7 @@ Non-obvious technical gotchas hit while building Streak Catcher: surprising beha
 
 **Why:** like Whisper-family models, Whistle can hallucinate a short common word on near-silent audio. Pure digital silence is skipped, but real mic noise isn't.
 
-**Fix:** none yet. Phase 11 must treat very short, low-confidence finals as "no speech" (word `probability` is available), with thresholds in config.
+**Fix (Phase 11):** confidence does **not** help: in a real session, hallucinated "Thank you. … you." scored p = 0.89–1.0, higher than the real word "Try" (0.67). What separates them is **audio loudness**: hallucinated words sat on ~0.001–0.002 RMS (noise floor ~0.003), real speech on 0.019–0.044. Words whose surrounding 100 ms chunks are below `speech_min_rms` (0.008) are dropped.
 
 **Avoid next time:** test ASR with real ambient mic noise, not only with silence or clean speech.
 
@@ -177,6 +177,8 @@ Non-obvious technical gotchas hit while building Streak Catcher: surprising beha
 
 **Why (suspected):** the deprecated CoreGraphics capture path goes through a WindowServer service that can stall independently of ScreenCaptureKit.
 
+**Update (Phase 11):** it recurred, and **ScreenCaptureKit** (`SCScreenshotManager`) also hung (30 s, no callback) from the same process, while the `screencapture` CLI still worked and the user's own runs from the VS Code terminal saved frames normally. The stalls hit processes launched under the Copilot agent runtime (a different responsible process for TCC), not the app as the user runs it. The Phase 11 check uses a synthetic display (patching `screen_capture.Quartz.CGDisplayCreateImage`) so it doesn't depend on the capture service; older capture-dependent checks still need a working capture service.
+
 **Fix:** the capture log now reports the elapsed time and says "capture service stalled" when a `None` takes longer than 2 s, instead of blaming permissions. If it recurs, fall back to ScreenCaptureKit (`SCScreenshotManager`).
 
 **Avoid next time:** when a capture returns `None`, log how long it took. A fast `None` means permission or display trouble; a slow one means a stalled service.
@@ -204,3 +206,15 @@ Non-obvious technical gotchas hit while building Streak Catcher: surprising beha
 **Fix:** to inspect pixels, redraw the image into a `CGBitmapContext` with a known layout (`kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little` = BGRA), then read that buffer.
 
 **Avoid next time:** never assume a `CGImage`'s byte layout. Normalize through a bitmap context, or check `CGImageGetBitmapInfo` and `CGImageGetAlphaInfo`, before indexing channels.
+
+---
+
+## 17. A colored annotation box can vanish on a same-hue background (Phase 11)
+
+**What:** numbered gesture boxes were drawn correctly, but a magenta box on a red screen was nearly invisible, both to the eye and to a pixel check.
+
+**Why:** a single-color stroke only stands out where the background contrasts with it. Real screens can be any color, and the LLM must see the box.
+
+**Fix:** draw a wider contrasting halo (white, `annotation_halo_rgba`) under every box and badge, then the colored stroke on top.
+
+**Avoid next time:** test overlays and annotations on several background colors, including ones close to the annotation's own color.

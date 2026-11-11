@@ -463,16 +463,19 @@ Measured on this Mac (synthetic 3.4 s sentence, 1 s chunks): import ~50 ms, `Whi
 
 ### 17.4 Contexts, annotation, and request assembly (Phase 11)
 
-- **Context = a group of visually similar frames** (same changed-area metric). This never misplaces a box after scrolling, and returning to an earlier screen merges into its context. App switches are capture triggers, not grouping keys.
-- **One annotated overview per context, no crops.** Draw a numbered box `[n]` for each gesture in that context on the context's representative frame (gesture-start frames preferred).
-- **Markers:** insert `[n]` into the final transcript at gesture `n`'s time, using word timestamps (after the word nearest `t_start`).
+- **One request per release (segment).** A reused folder gets `request_N.json` and `context_N_k.jpg` for segment N. The segment's frames are those kept or merged-into during `[segment start, stop + 1 s]`; its gestures are those numbered from the segment's first index.
+- **Context = a group of visually similar frames** (same changed-area metric, but with the looser `context_changed_pct`, since kept frames already differ by at least `dedup_changed_pct`). Greedy, in time order: a frame joins the context whose first frame differs least, if below the threshold. This never misplaces a box after scrolling, and returning to an earlier screen merges into its context. App switches are capture triggers, not grouping keys.
+- **One annotated overview per context, no crops.** Draw a numbered box `[n]` for each gesture in that context on the context's representative frame: the gesture-start frame of its first gesture, or the latest frame for contexts without gestures. Box = gesture bbox + `annotation_pad_pt`, stroked in `annotation_rgba` over a wider `annotation_halo_rgba` halo (a magenta box alone was nearly invisible on red), with an `[n]` badge above the top-left corner.
+- **Hallucination filter:** a word is dropped when the loudest 100 ms chunk overlapping `[start - speech_rms_margin_s, end + margin]` is below `speech_min_rms` (`Session.audio_levels`, recorded per chunk). Word confidence is useless here: hallucinated "you." scored p = 1.0. Dropped words are listed in the request.
+- **Markers:** insert `[n]` after the word whose midpoint is nearest gesture `n`'s `t_start`. Without word timings (fake processor or timeout), the markers are appended at the end.
 - **Concurrency:** on release, the image job (dedup, contexts, annotation) starts immediately on a worker thread. Assembly waits for the final transcript up to `assembly_timeout_s` (caption: "Transcribing…"), or up to `model_wait_timeout_s` if the model is still loading (caption: "Waiting for speech model…"). On timeout it uses the committed text so far (logged). Neither blocks the next session.
 - **Edge cases:**
   - Speech and no gestures: the images are the unique (deduped) frames from start, release, app switches, and the safety net, without boxes.
   - Gestures and no speech (empty transcript): nothing is sent; a brief caption "No instructions heard" (~1.5 s).
   - Neither: nothing is sent.
 - **Image cap:** `max_images` (`None` = no cap). When over the cap, keep the first or last contexts per `truncate_keep` (`"start"` / `"end"`).
-- Saved per session: `request.json` (transcript with markers, image list, context map) and `context_N.jpg`.
+- **Final transcript hand-off:** the controller keeps a per-session FIFO of assemblers; each final transcript (`on_transcript(is_final=True)`) is delivered to the oldest one. The committed text from partials is kept per session as the timeout fallback. "Transcribing…" / "Waiting for speech model…" is shown only if the wait exceeds `assembly_status_after_s`, and never over a newer session's caption.
+- Saved per segment: `request.json` with `session`, `segment`, `status` (`ok` / `no_speech` / `empty`), `transcript`, `transcript_with_markers`, `words` (kept, with `rms`), `dropped_words`, `gestures` (with `context`), `contexts` (`id`, `image`, `frame`, `frames`, `app`, `gestures`), `images` (absolute paths, in order), `truncated_contexts`, and `assembly_s`. Also `context_k.jpg`. The request is handed to `controller.on_request` on the main thread (Phase 12 sends it); `last_transcript` becomes the marked transcript.
 
 ### 17.5 LLM provider and response (Phases 12–13)
 
@@ -512,6 +515,10 @@ class LLMProvider(Protocol):
 | `safety_net_interval_s` | `2.0` | Periodic safety-net capture |
 | `dedup_thumb_width` / `dedup_pixel_delta` / `dedup_changed_pct` | `256` / `24` / `3.0` | Changed-area duplicate and context test |
 | `max_images` / `truncate_keep` | `None` / `"end"` | Image cap and which end to keep |
+| `context_changed_pct` | `15` | Changed area below which frames share a context (one image) |
+| `speech_min_rms` / `speech_rms_margin_s` | `0.008` / `0.05` | Drop words over near-silent audio (hallucinations) |
+| `assembly_status_after_s` / `no_instructions_caption_s` | `0.3` / `1.5` | Caption status timing |
+| `annotation_rgba` / `annotation_halo_rgba` / `annotation_pad_pt` / `annotation_line_pt` / `annotation_halo_pt` / `annotation_label_pt` | magenta / white / `8` / `3` / `2` / `16` | Numbered gesture boxes |
 | `assembly_timeout_s` / `model_wait_timeout_s` | `5.0` / `60.0` | Wait for the final transcript, or for the model to load |
 | `llm_provider` / `llm_model` / `llm_timeout_s` / `copilot_cli_path` | `"copilot"` / `"gpt-5.4"` / `60.0` / `None` | LLM |
 | `response_max_width_pt` / `response_width_fraction` / `response_max_height_fraction` | `900` / `0.7` / `0.5` | Response panel size |

@@ -23,6 +23,7 @@ class Session:
     words: list = field(default_factory=list)  # [{"word", "start", "end", "p"}], seconds since session start
     path: list = field(default_factory=list)  # [(t, x, y)] cursor samples, seconds since session start, global Cocoa pts
     gestures: list = field(default_factory=list)  # [Gesture], numbered across segments
+    audio_levels: list = field(default_factory=list)  # [(t_end_of_chunk, rms)] on the session clock
     frames: list = field(default_factory=list)  # [(t_offset_s, path, display_id)] of saved frames
 
 

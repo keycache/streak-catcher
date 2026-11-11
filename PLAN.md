@@ -200,14 +200,14 @@ ASR engine: **`cactus-compute`** (`cactus.agent.whistle.Whistle`), following the
 
 **Goal:** the smallest input that still carries everything the LLM needs.
 
-- [ ] Group frames into **contexts** by visual similarity (the same changed-area metric). Returning to a screen merges into its context.
-- [ ] Render one **annotated overview per context**: numbered bounding boxes for every gesture in that context, drawn on that context's frame. No crops.
-- [ ] Insert `[n]` markers into the transcript at each gesture's time, using word timestamps.
-- [ ] On release, start the image job immediately and wait for the final transcript for up to `assembly_timeout_s`, with the caption showing "Transcribing…". If the model is still loading, wait up to `model_wait_timeout_s` ("Waiting for speech model…"). On timeout, use the text committed so far and log it. Transcription never blocks capture or the next session.
-- [ ] Treat very short, low-confidence finals as no speech: Whistle can hallucinate words such as "you" on near-silent input (seen in Phase 8). Thresholds go in config.
-- [ ] Edge cases: talking with no gestures sends the unique deduped frames. Gestures with no speech show a brief caption "No instructions heard" and nothing is sent.
-- [ ] `max_images` (`None` = no cap) and `truncate_keep` (`"end"` by default, keeping the most recent contexts; or `"start"`).
-- [ ] Save the assembled request (`request.json` plus the annotated images) in the session folder for debugging.
+- [x] Group frames into **contexts** by visual similarity (the same changed-area metric). Returning to a screen merges into its context.
+- [x] Render one **annotated overview per context**: numbered bounding boxes for every gesture in that context, drawn on that context's frame. No crops.
+- [x] Insert `[n]` markers into the transcript at each gesture's time, using word timestamps.
+- [x] On release, start the image job immediately and wait for the final transcript for up to `assembly_timeout_s`, with the caption showing "Transcribing…". If the model is still loading, wait up to `model_wait_timeout_s` ("Waiting for speech model…"). On timeout, use the text committed so far and log it. Transcription never blocks capture or the next session.
+- [x] Drop hallucinated words: Whistle produces "you" / "Thank you" on near-silent audio **with confidence ~1.0**, so confidence is useless. Instead, a word is dropped when the recorded audio around it is quieter than `speech_min_rms` (real speech measured 0.019–0.044 RMS, noise ~0.003).
+- [x] Edge cases: talking with no gestures sends the unique deduped frames. Gestures with no speech show a brief caption "No instructions heard" and nothing is sent.
+- [x] `max_images` (`None` = no cap) and `truncate_keep` (`"end"` by default, keeping the most recent contexts; or `"start"`).
+- [x] Save the assembled request (`request.json` plus the annotated images) in the session folder for debugging.
 
 **Done when:** sample sessions produce the expected contexts, boxes, and markers, and a gesture-only session exits gracefully.
 
@@ -245,7 +245,8 @@ All questions are answered. Every tunable value is a `config.py` field; the defa
 | Circle | Loop found anywhere inside a stroke (turning + closure + aspect); repeated loops merge | `circle_min_turn_deg` (`300`), `circle_close_ratio` (`0.35`), `circle_max_aspect` (`3.0`), `gesture_merge_overlap` (`0.6`, same stroke), `gesture_merge_iou` (`0.5`, across pauses) |
 | Underline | Flat ↔ legs with reversals; short legs (overshoot fixes) folded away | `underline_max_dy_ratio` (`0.3`), `underline_min_dx_pt` (`60`), `underline_min_leg_pt` (`30`), `underline_min_reversals` (`1`); robust line-fit trim: `underline_band_pt` (`12`), `underline_max_slope` (`0.25`), `underline_max_gap_pts` (`6`) |
 | Rolling buffer | Keep the 500 ms cadence; the stroke in progress is always kept | `frame_buffer_interval_s` (`0.5`), `frame_buffer_s` (`4.0`), `frame_buffer_max` (`60`), `safety_net_interval_s` (`2.0`), `app_switch_settle_s` (`0.3`), `frames_include_streak` (`False`) |
-| Dedup / contexts | Changed area on grayscale thumbnails | `dedup_thumb_width` (`256`), `dedup_pixel_delta` (`24`), `dedup_changed_pct` (`3.0`) |
+| Dedup / contexts | Changed area on grayscale thumbnails; contexts use a looser threshold than dedup | `dedup_thumb_width` (`256`), `dedup_pixel_delta` (`24`), `dedup_changed_pct` (`3.0`), `context_changed_pct` (`15`) |
+| Requests | One per release (segment); hallucinated words dropped by audio loudness; numbered boxes with a contrasting halo | `speech_min_rms` (`0.008`), `speech_rms_margin_s` (`0.05`), `assembly_status_after_s` (`0.3`), `annotation_rgba`, `annotation_halo_rgba`, `annotation_pad_pt` (`8`), `annotation_line_pt` (`3`), `annotation_halo_pt` (`2`), `annotation_label_pt` (`16`), `no_instructions_caption_s` (`1.5`) |
 | Image cap | No cap; keep the most recent when capped | `max_images` (`None`), `truncate_keep` (`"end"`) |
 | Waiting for transcript | Caption shows status; fall back to committed text | `assembly_timeout_s` (`5.0`), `model_wait_timeout_s` (`60.0`) |
 | LLM | Copilot SDK, new session per request | `llm_provider` (`"copilot"`), `llm_model` (`"gpt-5.4"`), `llm_timeout_s` (`60.0`), `copilot_cli_path` (`None`) |

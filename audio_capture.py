@@ -113,6 +113,7 @@ class AudioRecorder(threading.Thread):
                     t_offset_s=time.monotonic() - self.session.started_at,
                 )
                 rms = float(np.sqrt(np.mean(samples**2)))
+                self.session.audio_levels.append((round(chunk.t_offset_s, 3), round(rms, 5)))
                 self.on_chunk(chunk)
                 log("audio", f"chunk {self.count} rms={rms:.4f}", debug=True)
         except Exception:

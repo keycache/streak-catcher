@@ -74,6 +74,22 @@ class Config:
     underline_max_slope: float = 0.25  # steepest underline considered (dy/dx, ~14°)
     underline_max_gap_pts: int = 6  # resampled outlier points tolerated inside the underline before it is cut
 
+    # request assembly (Phase 11): one request per release
+    context_changed_pct: float = 15.0  # frames differing less than this (changed area) share a context/image
+    assembly_timeout_s: float = 5.0  # wait this long for the final transcript after release
+    assembly_status_after_s: float = 0.3  # show "Transcribing…" only if the wait is longer than this
+    speech_min_rms: float = 0.008  # words over quieter audio are dropped (Whistle hallucinates "you" on silence)
+    speech_rms_margin_s: float = 0.05  # audio window around each word for the loudness check
+    max_images: int | None = None  # None = no cap on context images per request
+    truncate_keep: str = "end"  # when capped: keep the most recent ("end") or earliest ("start") contexts
+    annotation_rgba: tuple = (1.0, 0.1, 0.45, 1.0)  # numbered gesture boxes on context images
+    annotation_pad_pt: float = 8.0  # box padding around the gesture bbox
+    annotation_halo_rgba: tuple = (1.0, 1.0, 1.0, 1.0)  # contrasting outline under boxes/badges (visible on any background)
+    annotation_halo_pt: float = 2.0
+    annotation_line_pt: float = 3.0
+    annotation_label_pt: float = 16.0
+    no_instructions_caption_s: float = 1.5  # "No instructions heard" caption duration
+
     # caption
     caption_hide_delay_s: float = 2.0
     # Use a fake audio processor that emits placeholder words (to exercise the caption before real STT).
