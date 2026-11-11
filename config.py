@@ -17,7 +17,16 @@ class Config:
 
     # screen capture
     screen_capture_enabled: bool = True  # False: no screenshots are taken during sessions
-    capture_interval_s: float = 0.5
+    # Event-driven capture (Phase 10): frames are grabbed into an in-memory buffer; only chosen ones are saved.
+    frame_buffer_interval_s: float = 0.5  # grab cadence
+    frame_buffer_s: float = 4.0  # keep at least this much history (plus the whole stroke in progress)
+    frame_buffer_max: int = 60  # hard cap on buffered frames (~500 KB each)
+    safety_net_interval_s: float = 2.0  # also save a frame this often (dropped if it duplicates a saved one)
+    app_switch_settle_s: float = 0.3  # wait this long after the frontmost app changes before saving a frame
+    dedup_thumb_width: int = 256  # grayscale thumbnail width used for duplicate checks
+    dedup_pixel_delta: int = 24  # gray-level difference that counts a thumbnail pixel as changed
+    dedup_changed_pct: float = 3.0  # frames with less changed area than this are duplicates
+    frames_include_streak: bool = False  # False = clean frames (streak excluded); annotations are drawn later
     # Frame size relative to native Retina pixels: 0.5 = logical screen size (~490 KB/frame
     # instead of ~1.3 MB at 1.0, text still readable). 1.0 keeps full resolution.
     capture_scale: float = 0.5

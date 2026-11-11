@@ -78,7 +78,7 @@ class Config:
 
     # screen capture
     screen_capture_enabled: bool = True                    # False: sessions take no screenshots
-    capture_interval_s: float = 0.5
+    frame_buffer_interval_s: float = 0.5                   # Phase 10 buffer cadence (see §17.3 for all capture keys)
     capture_scale: float = 0.5                             # 0.5 = logical size (~490 KB/frame); 1.0 = full Retina
     jpeg_quality: float = 0.85
 
@@ -217,6 +217,8 @@ class Trail:
 5. If no longer sampling and the trail is empty, invalidate the timer and close the windows.
 
 ## 8. Screen capture (`screen_capture.py`)
+
+> **Superseded in part by Phase 10 (§17.3):** frames are grabbed into an in-memory buffer and only trigger-selected, deduplicated frames are written. The capture primitives below (CGDisplayCreateImage, scaling, JPEG via ImageIO, `CapturedFrame`) are unchanged.
 
 ```python
 @dataclass(frozen=True)
@@ -451,11 +453,13 @@ Measured on this Mac (synthetic 3.4 s sentence, 1 s chunks): import ~50 ms, `Whi
 
 ### 17.3 Event-driven capture (Phase 10)
 
-- **Clean frames:** overlay windows get `setSharingType_(NSWindowSharingNone)`, so the streak is not captured. Annotations are drawn by the app later.
-- **Rolling buffer:** the capturer keeps grabbing every `frame_buffer_interval_s` but keeps only the last `frame_buffer_s` seconds as encoded JPEG bytes **in memory** (about 4 MB). Nothing is written until a frame is chosen.
+- **Clean frames:** overlay windows get `setSharingType_(NSWindowSharingNone)` unless `frames_include_streak`, so the streak is not captured. Annotations are drawn by the app later.
+- **Rolling buffer:** the `screen-capture` thread grabs every `frame_buffer_interval_s`. Each `BufferedFrame` holds the JPEG bytes, a grayscale thumbnail (`dedup_thumb_width` px), the time, mouse position, and frontmost app, **in memory**. Pruning keeps the last `frame_buffer_s` seconds **plus everything since the stroke in progress began** (`GestureDetector.stroke_start`), so a gesture detected long after it started (a 6 s spiral) still has its start frame; `frame_buffer_max` caps memory. Nothing is written until a frame is chosen.
+- **One thread does selection:** the main thread only enqueues requests (`request_gesture(g)` from `_on_gesture`, `request_app_switch(t, app)` from the `NSWorkspaceDidActivateApplicationNotification` observer, ignoring our own pid). Each capture tick drains them. Gesture start = last buffered frame with `t ≤ t_start`. Gesture end and app switch wait in `pending` until a frame at or after `t_end` (or switch time + `app_switch_settle_s`) exists. On stop the thread grabs one fresh `release` frame and resolves everything pending. `controller.stop()` finishes the gesture detector **before** stopping the capturer, so gestures closed by release still get frames.
 - **Persist triggers:** session start; gesture start (the buffered frame just before `t_start`); gesture end; frontmost-app change (`NSWorkspaceDidActivateApplicationNotification`); release; and a safety net every `safety_net_interval_s` (2 s).
 - **Dedup (changed area):** downscale both frames to grayscale `dedup_thumb_width` px wide and count the pixels whose difference exceeds `dedup_pixel_delta`. If changed area < `dedup_changed_pct`% of the frame, they are duplicates. Safety-net and app-switch frames can be dropped as duplicates. **Gesture frames are only merged** (they keep their gesture refs) and never dropped.
-- `frames.json`: per frame, the trigger, `t`, frontmost app, gesture indices, and the duplicate-of reference.
+- `frames.json` (`{"session", "frames": [...]}`), per kept frame: `file`, `t`, `triggers` (all triggers that chose or merged into it), `gestures`, `app`, `display_id`, `mouse`, `width`, `height`, `changed_pct_vs_nearest`, and `merged` (each duplicate request: trigger, t, changed %, gesture). `Session.frames` holds the same records plus `path` and `thumb` (used for dedup across reused segments and by gesture debug images, which prefer the gesture's own start frame).
+- Measured: a 9 s session with 2 gestures, an app switch, and 3 distinct screens grabbed 20 frames and kept 3 (4 duplicate requests dropped, gesture requests merged).
 
 ### 17.4 Contexts, annotation, and request assembly (Phase 11)
 
@@ -503,7 +507,8 @@ class LLMProvider(Protocol):
 | `circle_min_turn_deg` / `circle_close_ratio` / `circle_max_aspect` | `300` / `0.35` / `3.0` | Circle detection (closure relative to bbox diagonal) |
 | `underline_max_dy_ratio` / `underline_min_dx_pt` / `underline_min_leg_pt` / `underline_min_reversals` | `0.3` / `60` / `30` / `1` | Underline (↔) detection |
 | `underline_band_pt` / `underline_max_slope` / `underline_max_gap_pts` | `12` / `0.25` / `6` | Robust line fit that trims stray travel from underlines |
-| `frame_buffer_interval_s` / `frame_buffer_s` | `0.5` / `4.0` | Rolling in-memory frame buffer |
+| `frame_buffer_interval_s` / `frame_buffer_s` / `frame_buffer_max` | `0.5` / `4.0` / `60` | Rolling in-memory frame buffer (plus the stroke in progress) |
+| `app_switch_settle_s` / `frames_include_streak` | `0.3` / `False` | Delay before the app-switch frame; clean frames |
 | `safety_net_interval_s` | `2.0` | Periodic safety-net capture |
 | `dedup_thumb_width` / `dedup_pixel_delta` / `dedup_changed_pct` | `256` / `24` / `3.0` | Changed-area duplicate and context test |
 | `max_images` / `truncate_keep` | `None` / `"end"` | Image cap and which end to keep |

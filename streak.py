@@ -18,6 +18,7 @@ from AppKit import (
     NSWindowCollectionBehaviorFullScreenAuxiliary,
     NSWindowCollectionBehaviorIgnoresCycle,
     NSWindowCollectionBehaviorStationary,
+    NSWindowSharingNone,
     NSWindowStyleMaskBorderless,
 )
 from Foundation import NSMakeRect, NSObject, NSRunLoop, NSTimer
@@ -151,6 +152,8 @@ class StreakOverlay:
             win.setLevel_(NSScreenSaverWindowLevel)
             win.setCollectionBehavior_(behavior)
             win.setReleasedWhenClosed_(False)
+            if not self.cfg.frames_include_streak:
+                win.setSharingType_(NSWindowSharingNone)  # clean frames: streak not captured
             view = StreakView.alloc().initWithFrame_overlay_(
                 NSMakeRect(0, 0, frame.size.width, frame.size.height), self
             )

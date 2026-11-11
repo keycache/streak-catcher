@@ -192,3 +192,15 @@ Non-obvious technical gotchas hit while building Streak Catcher: surprising beha
 **Fix:** after finding a candidate, fit the dominant near-horizontal line robustly (RANSAC plus a least-squares refit on inliers), keep only the longest run of points within a ±12 pt band, and re-validate. The box went to 398×23 and the start time to the real start of the scribble. The session is now a fixture (`.tmp/fixtures/path_underline_approach_181302.json`).
 
 **Avoid next time:** per-leg shape tests are fooled by travel that happens to be shaped like a leg. When most points share one structure (a line, a loop), fit that structure robustly and measure the gesture from its inliers.
+
+---
+
+## 16. Decoded JPEGs are RGBA; display captures are BGRA (Phase 10)
+
+**What:** pixel checks on saved frames reported a red panel as blue (and the reverse), and a magenta-box check found 0 magenta pixels, while the images themselves were correct.
+
+**Why:** `CGDisplayCreateImage` returns 32-bit little-endian **BGRA**, but a JPEG decoded with `CGImageSourceCreateImageAtIndex` comes back **RGBA** (or RGBX). Reading `CGDataProviderCopyData` bytes with one fixed channel order silently swaps red and blue for the other source.
+
+**Fix:** to inspect pixels, redraw the image into a `CGBitmapContext` with a known layout (`kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little` = BGRA), then read that buffer.
+
+**Avoid next time:** never assume a `CGImage`'s byte layout. Normalize through a bitmap context, or check `CGImageGetBitmapInfo` and `CGImageGetAlphaInfo`, before indexing channels.

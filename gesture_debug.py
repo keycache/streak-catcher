@@ -36,17 +36,20 @@ def _draw_label(ctx, text: str, x: float, y: float, size: float) -> None:
 def render(session, frames, out_dir: Path, quality: float) -> list[Path]:
     """Write debug_gesture_N.jpg for every gesture in `session`. Returns the written paths.
 
-    frames: [(t_offset_s, path, display_id)] captured during the session.
+    frames: kept frame records (dicts with "t", "path", "display_id", "gestures", "triggers").
     """
     written = []
     fx, fy = session.screen_frame.origin.x, session.screen_frame.origin.y
     fw = session.screen_frame.size.width
     for g in session.gestures:
-        same_display = [f for f in frames if f[2] == session.display_id] or frames
-        if not same_display:
+        if not frames:
             log("gesture", f"debug image #{g.index}: no captured frames (screen capture disabled?)")
             continue
-        t_frame, frame_path, _ = min(same_display, key=lambda f: abs(f[0] - g.t_start))
+        # Prefer the frame chosen for this gesture's start; otherwise the nearest one in time.
+        own = [f for f in frames if g.index in f["gestures"] and "gesture_start" in f["triggers"]]
+        own = own or [f for f in frames if g.index in f["gestures"]]
+        rec = own[0] if own else min(frames, key=lambda f: abs(f["t"] - g.t_start))
+        t_frame, frame_path = rec["t"], rec["path"]
         with objc.autorelease_pool():
             img = _load(frame_path)
             if img is None:

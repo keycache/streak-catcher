@@ -100,6 +100,11 @@ class GestureDetector:
         self._stroke: list[tuple[float, float, float]] = []
         self._still_since = None
 
+    @property
+    def stroke_start(self) -> float | None:
+        """Session time where the stroke in progress began (None when idle)."""
+        return self._stroke[0][0] if self._stroke else None
+
     # --- streaming -------------------------------------------------------
 
     def feed(self, t: float, x: float, y: float) -> None:

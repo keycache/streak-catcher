@@ -37,7 +37,7 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 | Menu items | Enable/Disable hotkey, Open captures folder, Show last transcript, Quit |
 | Hotkey | `pynput`. Left Ctrl + Left Shift + Left Option held; other modifiers ignored |
 | Streak | White/cyan glow, short fade (`streak_fade_s`). Visible in screenshots until Phase 10, which switches to clean frames with app-drawn annotations |
-| Capture | Quartz `CGDisplayCreateImage`, display where the combo started (fixed), every 500 ms whether or not the mouse moves |
+| Capture | Quartz `CGDisplayCreateImage`, display where the combo started (fixed). From Phase 10: grabbed every 500 ms into an in-memory buffer; only frames chosen by triggers (start, gesture start and end, app switch, 2 s safety net, release) are saved, after changed-area dedup. Frames are clean (streak excluded) |
 | Images | JPEG (quality 0.85, half Retina size via `capture_scale = 0.5`, ~500 KB per frame) saved to a per-session folder, then passed to a per-image background worker. A restart within `session_reuse_window_s` (default 10 s) of the previous stop continues the same folder |
 | Audio | PyAudio, 16 kHz, mono, int16 → float32, 1600-sample (100 ms) chunks (the format the `asr` module expects) |
 | Audio save | Session audio is also saved as `audio.wav` |
@@ -188,11 +188,11 @@ ASR engine: **`cactus-compute`** (`cactus.agent.whistle.Whistle`), following the
 
 **Goal:** few frames, but the right ones.
 
-- [ ] Clean frames: exclude the streak overlay windows from capture (`NSWindowSharingNone`). The app draws its own annotations later.
-- [ ] Rolling in-memory buffer: capture every `frame_buffer_interval_s` and keep the last `frame_buffer_s` seconds as encoded JPEG bytes. Nothing is written to disk until a frame is chosen.
-- [ ] Triggers that persist a frame: session start, gesture start (the buffered frame just before `t_start`), gesture end, frontmost-app switch (`NSWorkspace` activation notification), release, and a safety net every `safety_net_interval_s`.
-- [ ] Dedup by **changed area**: grayscale thumbnails `dedup_thumb_width` px wide; a pixel counts as changed when it differs by more than `dedup_pixel_delta`; frames are duplicates when less than `dedup_changed_pct`% of pixels changed. Safety-net frames can be dropped; gesture frames are only merged, never dropped.
-- [ ] Write `frames.json` (frame → trigger, time, app, gesture refs).
+- [x] Clean frames: exclude the streak overlay windows from capture (`NSWindowSharingNone`). The app draws its own annotations later.
+- [x] Rolling in-memory buffer: capture every `frame_buffer_interval_s` and keep the last `frame_buffer_s` seconds as encoded JPEG bytes. Nothing is written to disk until a frame is chosen.
+- [x] Triggers that persist a frame: session start, gesture start (the buffered frame just before `t_start`), gesture end, frontmost-app switch (`NSWorkspace` activation notification), release, and a safety net every `safety_net_interval_s`.
+- [x] Dedup by **changed area**: grayscale thumbnails `dedup_thumb_width` px wide; a pixel counts as changed when it differs by more than `dedup_pixel_delta`; frames are duplicates when less than `dedup_changed_pct`% of pixels changed. Safety-net frames can be dropped; gesture frames are only merged, never dropped.
+- [x] Write `frames.json` (frame → trigger, time, app, gesture refs).
 
 **Done when:** a 10 s session with two gestures and one app switch leaves only a handful of frames on disk, none of them near-duplicates, and the gesture frames show the screen as it was when each gesture began.
 
@@ -244,7 +244,7 @@ All questions are answered. Every tunable value is a `config.py` field; the defa
 | Strokes | Split at pauses; speed over a short window; resampled before measuring turns | `gesture_pause_s` (`0.15`), `gesture_pause_speed_pt_s` (`60`), `gesture_speed_window_s` (`0.05`), `gesture_resample_pt` (`4`), `gesture_min_size_pt` (`30`) |
 | Circle | Loop found anywhere inside a stroke (turning + closure + aspect); repeated loops merge | `circle_min_turn_deg` (`300`), `circle_close_ratio` (`0.35`), `circle_max_aspect` (`3.0`), `gesture_merge_overlap` (`0.6`, same stroke), `gesture_merge_iou` (`0.5`, across pauses) |
 | Underline | Flat ↔ legs with reversals; short legs (overshoot fixes) folded away | `underline_max_dy_ratio` (`0.3`), `underline_min_dx_pt` (`60`), `underline_min_leg_pt` (`30`), `underline_min_reversals` (`1`); robust line-fit trim: `underline_band_pt` (`12`), `underline_max_slope` (`0.25`), `underline_max_gap_pts` (`6`) |
-| Rolling buffer | Keep the 500 ms cadence | `frame_buffer_interval_s` (`0.5`), `frame_buffer_s` (`4.0`), `safety_net_interval_s` (`2.0`) |
+| Rolling buffer | Keep the 500 ms cadence; the stroke in progress is always kept | `frame_buffer_interval_s` (`0.5`), `frame_buffer_s` (`4.0`), `frame_buffer_max` (`60`), `safety_net_interval_s` (`2.0`), `app_switch_settle_s` (`0.3`), `frames_include_streak` (`False`) |
 | Dedup / contexts | Changed area on grayscale thumbnails | `dedup_thumb_width` (`256`), `dedup_pixel_delta` (`24`), `dedup_changed_pct` (`3.0`) |
 | Image cap | No cap; keep the most recent when capped | `max_images` (`None`), `truncate_keep` (`"end"`) |
 | Waiting for transcript | Caption shows status; fall back to committed text | `assembly_timeout_s` (`5.0`), `model_wait_timeout_s` (`60.0`) |

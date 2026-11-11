@@ -1,7 +1,8 @@
 import json
+import os
 import time
 
-from AppKit import NSEvent
+from AppKit import NSEvent, NSWorkspace, NSWorkspaceDidActivateApplicationNotification
 from Foundation import NSObject, NSTimer
 
 from PyObjCTools import AppHelper
@@ -33,6 +34,17 @@ class WatchdogTimerTarget(NSObject):
 
     def tick_(self, _timer):
         self.callback()
+
+
+class AppActivationObserver(NSObject):
+    def initWithCallback_(self, callback):
+        self = self.init()
+        self.callback = callback
+        return self
+
+    def appActivated_(self, note):
+        app = note.userInfo()["NSWorkspaceApplicationKey"]
+        self.callback(str(app.localizedName() or ""), int(app.processIdentifier()))
 
 
 class SessionController:
@@ -67,6 +79,12 @@ class SessionController:
         self.transcript: list[str] = []
         self._watchdog = None
         self._timer_target = WatchdogTimerTarget.alloc().initWithCallback_(self._watchdog_tick)
+        front = NSWorkspace.sharedWorkspace().frontmostApplication()
+        self.current_app = str(front.localizedName()) if front is not None else ""
+        self._app_observer = AppActivationObserver.alloc().initWithCallback_(self._on_app_activated)
+        NSWorkspace.sharedWorkspace().notificationCenter().addObserver_selector_name_object_(
+            self._app_observer, "appActivated:", NSWorkspaceDidActivateApplicationNotification, None
+        )
         if self.speech is not None:
             delegate.set_model_status("Loading speech model…")
             self.speech.start()
@@ -103,7 +121,11 @@ class SessionController:
             log_exc("session", "audio failed to start")
         try:
             if self.cfg.screen_capture_enabled:
-                self.capturer = ScreenCapturer(self.session, self._on_frame, self.cfg)
+                self.capturer = ScreenCapturer(
+                    self.session, self._on_frame, self.cfg,
+                    current_app=lambda: self.current_app,
+                    protect_from=lambda: self.detector.stroke_start if self.detector else None,
+                )
                 self.capturer.start()
             else:
                 log("session", "screen capture disabled (config.screen_capture_enabled=False)")
@@ -121,6 +143,12 @@ class SessionController:
         if self._watchdog is not None:
             self._watchdog.invalidate()
             self._watchdog = None
+        if self.detector is not None:  # first, so gestures closed by release still get their frames
+            try:
+                self.detector.finish()
+            except Exception:
+                log_exc("gesture", "gesture detection failed at stop")
+            self.detector = None
         frames = 0
         if self.capturer is not None:
             self.capturer.stop()
@@ -132,12 +160,6 @@ class SessionController:
             chunks = self.recorder.count
             self.recorder = None
             self.audio_worker.end_session()
-        if self.detector is not None:
-            try:
-                self.detector.finish()
-            except Exception:
-                log_exc("gesture", "gesture detection failed at stop")
-            self.detector = None
         if reason == "quit":
             self.streak.close()
             self.caption.close()
@@ -149,6 +171,7 @@ class SessionController:
         s.frame_count += frames
         s.ended_at = time.monotonic()
         self._write_path(s)
+        self._write_frames(s)
         if self.cfg.gesture_debug_images and s.gestures:
             gesture_debug.render_async(s, s.frames, self.cfg.jpeg_quality)
         self.last_session, self.session = s, None
@@ -157,10 +180,25 @@ class SessionController:
                        f"folder={s.folder}")
 
     def _on_frame(self, frame) -> None:
-        """Capture thread: remember the frame for this session, then hand it to the image worker."""
-        if self.session is not None and frame.session_id == self.session.id:
-            self.session.frames.append((frame.t_offset_s, frame.path, frame.display_id))
+        """Capture thread: a frame was kept; hand it to the image worker."""
         self.image_worker.submit(frame)
+
+    def _on_app_activated(self, name: str, pid: int) -> None:
+        """Main thread: the frontmost app changed."""
+        if pid == os.getpid():
+            return  # our own alerts/menus
+        self.current_app = name
+        if self.session is not None and self.capturer is not None:
+            t = time.monotonic() - self.session.started_at
+            log("capture", f"app switch -> {name!r} at t={t:.2f}s")
+            self.capturer.request_app_switch(t, name)
+
+    def _write_frames(self, s) -> None:
+        try:
+            frames = [{k: v for k, v in r.items() if k not in ("thumb", "path")} for r in s.frames]
+            (s.folder / "frames.json").write_text(json.dumps({"session": s.id, "frames": frames}, indent=1))
+        except Exception:
+            log_exc("capture", "writing frames.json failed")
 
     def _on_sample(self, x: float, y: float, now: float) -> None:
         """Every streak sample (main thread, ~120 Hz) while a session is active."""
@@ -181,6 +219,8 @@ class SessionController:
             s.gestures.append(g)
         x, y, w, h = g.bbox
         log("gesture", f"#{g.index} {g.kind} t={g.t_start:.2f}-{g.t_end:.2f}s bbox=({x:.0f},{y:.0f}) {w:.0f}x{h:.0f}")
+        if self.capturer is not None:
+            self.capturer.request_gesture(g)
 
     def _write_path(self, s) -> None:
         try:
