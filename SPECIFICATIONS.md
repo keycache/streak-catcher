@@ -76,6 +76,7 @@ class Config:
     streak_widths: tuple = (18.0, 8.0, 3.0)               # outer glow, inner glow, core
 
     # screen capture
+    screen_capture_enabled: bool = True                    # False: sessions take no screenshots
     capture_interval_s: float = 0.5
     jpeg_quality: float = 0.85
 
@@ -86,6 +87,7 @@ class Config:
 
     # output
     captures_dir: Path = Path(__file__).parent / "captures"
+    session_reuse_window_s: float = 10.0                   # restart within N s of a stop reuses the folder; 0 = off
 
     # caption
     caption_hide_delay_s: float = 2.0
@@ -149,12 +151,13 @@ class Session:
 **`start()`** (main thread; does nothing if a session is already active):
 
 1. Find the screen under `NSEvent.mouseLocation()`: the first `NSScreen` where `NSMouseInRect(p, s.frame(), False)`, falling back to `NSScreen.mainScreen()`.
-2. Create the `Session` and `mkdir -p` its folder.
+2. Create the `Session` and `mkdir -p` its folder. If a folder with that timestamp already exists (two sessions within one second), append `-2`, `-3`, and so on.
+   - **Folder reuse:** if the previous session *stopped* no more than `session_reuse_window_s` seconds ago (default 10, `0` disables) and its folder still exists, the previous `Session` is continued instead: same folder and id, `segment` increments, frame numbering carries on (`frame_0007.jpg` …), and `frame_count` covers the whole folder. `t_offset_s` stays relative to the first segment's start. The display is re-picked for each segment.
 3. Start the `StreakOverlay`.
 4. Show the `CaptionPanel` with "Listening…" on that screen.
 5. Call `audio_processor.start_session(session)` through the audio worker.
 6. Start the `AudioRecorder`.
-7. Start the `ScreenCapturer`.
+7. Start the `ScreenCapturer` (skipped when `screen_capture_enabled` is False; the session folder is still created).
 8. Change the status item icon to the "active" symbol.
 
 **`stop(reason)`** (main thread; does nothing if idle):
@@ -350,7 +353,8 @@ captures/
     ├── frame_0001.jpg
     ├── frame_0002.jpg
     ├── ...
-    └── audio.wav          # 16 kHz, mono, 16-bit PCM
+    ├── audio.wav          # 16 kHz, mono, 16-bit PCM (segment 1)
+    └── audio_2.wav        # later segments when the folder is reused (§6)
 ```
 
 `captures/` is added to `.gitignore`.

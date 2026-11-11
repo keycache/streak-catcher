@@ -37,7 +37,7 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 | Hotkey | `pynput`. Left Ctrl + Left Shift + Left Option held; other modifiers ignored |
 | Streak | White/cyan glow, short fade (~250 ms), visible in screenshots |
 | Capture | Quartz `CGDisplayCreateImage`, display where the combo started (fixed), every 500 ms whether or not the mouse moves |
-| Images | JPEG saved to a per-session folder, then passed to a per-image background worker |
+| Images | JPEG saved to a per-session folder, then passed to a per-image background worker. A restart within `session_reuse_window_s` (default 10 s) of the previous stop continues the same folder |
 | Audio | PyAudio, 16 kHz, mono, int16 → float32, 1600-sample (100 ms) chunks (the format the `asr` module expects) |
 | Audio save | Session audio is also saved as `audio.wav` |
 | STT | Engine comes from the `asr` module (Parakeet via NeMo), **to be provided later** by the user. Stub until then |
@@ -96,10 +96,10 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 
 **Goal:** a JPEG every 500 ms, each handed to a stub post-processor.
 
-- [ ] `session.py`: create the session folder `captures/YYYYmmdd-HHMMSS/`.
-- [ ] `screen_capture.py`: a `ScreenCapturer` thread that captures the `CGDirectDisplayID` of the screen where the combo started. The first frame is taken immediately, then one every 500 ms on a drift-free schedule.
-- [ ] Encode JPEG through ImageIO (`CGImageDestination`, quality 0.85) to `frame_0001.jpg`, and so on.
-- [ ] `processing.py`: an `ImageProcessingWorker` (a `queue.Queue` and a daemon thread) that calls `process_image(frame)`. `process_image` does nothing for now.
+- [x] `session.py`: create the session folder `captures/YYYYmmdd-HHMMSS/`.
+- [x] `screen_capture.py`: a `ScreenCapturer` thread that captures the `CGDirectDisplayID` of the screen where the combo started. The first frame is taken immediately, then one every 500 ms on a drift-free schedule.
+- [x] Encode JPEG through ImageIO (`CGImageDestination`, quality 0.85) to `frame_0001.jpg`, and so on.
+- [x] `processing.py`: an `ImageProcessingWorker` (a `queue.Queue` and a daemon thread) that calls `process_image(frame)`. `process_image` does nothing for now.
 
 **Done when:** holding the combo for 3 s produces about 7 frames. The streak is visible in them, the caption panel isn't, and the worker logs each frame.
 
@@ -109,7 +109,7 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 
 - [ ] `audio_capture.py`: an `AudioRecorder` thread that opens a PyAudio stream (paInt16, 1 channel, 16 kHz, 1600 frames) when the session starts and closes it on stop.
 - [ ] Convert each chunk to float32 (`np.frombuffer(data, np.int16).astype(np.float32) / 32768.0`, see the Specification, §9) and send it to the `AudioProcessingWorker` queue.
-- [ ] Write the raw int16 data to `audio.wav` using the `wave` module.
+- [ ] Write the raw int16 data to `audio.wav` using the `wave` module. When the session folder is reused (restart within `session_reuse_window_s`), write `audio_2.wav`, `audio_3.wav`, … per segment so nothing is overwritten.
 - [ ] `processing.py`: an `AudioProcessor` stub with `start_session()`, `process_chunk(chunk) -> str | None`, and `end_session() -> str | None`. All of them return `None` for now.
 
 **Done when:** a 3 s session produces about 30 chunks and a playable `audio.wav` of about 3 s. The mic indicator turns off after release.

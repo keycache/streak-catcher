@@ -45,7 +45,7 @@ class AppDelegate(NSObject):
         self.hotkey = HotkeyListener(CONFIG.combo_vks, self._on_activate, self._on_deactivate)
         self.controller = SessionController(self, self.hotkey)
         self.on_hotkey_toggled = self._on_hotkey_toggled
-        self.shutdown_hooks += [lambda: self.controller.stop("quit"), self.hotkey.stop]
+        self.shutdown_hooks += [self.controller.shutdown, self.hotkey.stop]
         self.hotkey.start()
 
         log("app", f"ready (captures: {CONFIG.captures_dir})")

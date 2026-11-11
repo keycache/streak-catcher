@@ -9,13 +9,14 @@ class Config:
     combo_vks: frozenset[int] = frozenset({59, 56, 58})  # L-Ctrl, L-Shift, L-Option
 
     # streak
-    streak_fade_s: float = 0.25
+    streak_fade_s: float = 0.50
     streak_sample_hz: int = 120
     streak_core_rgba: tuple = (1.0, 1.0, 1.0, 0.95)  # white core
     streak_glow_rgba: tuple = (0.35, 0.9, 1.0, 1.0)  # cyan glow
     streak_widths: tuple = (18.0, 8.0, 3.0)  # outer glow, inner glow, core
 
     # screen capture
+    screen_capture_enabled: bool = True  # False: no screenshots are taken during sessions
     capture_interval_s: float = 0.5
     jpeg_quality: float = 0.85
 
@@ -26,6 +27,9 @@ class Config:
 
     # output
     captures_dir: Path = Path(__file__).parent / "captures"
+    # A session starting within this many seconds after the previous one stopped
+    # continues in the same capture folder. 0 disables reuse.
+    session_reuse_window_s: float = 10.0
 
     # caption
     caption_hide_delay_s: float = 2.0
