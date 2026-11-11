@@ -35,6 +35,19 @@ def write_jpeg(img, path: Path, quality: float) -> bool:
     return bool(Quartz.CGImageDestinationFinalize(dest))
 
 
+def scale_image(img, factor: float):
+    """Resample a CGImage by `factor` with high-quality interpolation."""
+    w = max(1, round(Quartz.CGImageGetWidth(img) * factor))
+    h = max(1, round(Quartz.CGImageGetHeight(img) * factor))
+    ctx = Quartz.CGBitmapContextCreate(
+        None, w, h, 8, 0, Quartz.CGColorSpaceCreateDeviceRGB(),
+        Quartz.kCGImageAlphaNoneSkipFirst | Quartz.kCGBitmapByteOrder32Little,
+    )
+    Quartz.CGContextSetInterpolationQuality(ctx, Quartz.kCGInterpolationHigh)
+    Quartz.CGContextDrawImage(ctx, Quartz.CGRectMake(0, 0, w, h), img)
+    return Quartz.CGBitmapContextCreateImage(ctx)
+
+
 class ScreenCapturer(threading.Thread):
     """Captures one display every `interval` seconds on a drift-free schedule."""
 
@@ -44,6 +57,7 @@ class ScreenCapturer(threading.Thread):
         self.on_frame = on_frame
         self.interval = config.capture_interval_s
         self.quality = config.jpeg_quality
+        self.scale = config.capture_scale
         self.stop_event = threading.Event()
         self.first_index = session.frame_count + 1  # continue numbering in a reused folder
         self.count = 0  # frames saved by this capturer
@@ -82,6 +96,8 @@ class ScreenCapturer(threading.Thread):
             log("capture", f"CGDisplayCreateImage returned None for display {self.session.display_id} "
                            "(display gone or Screen Recording denied); skipping")
             return
+        if self.scale != 1.0:
+            img = scale_image(img, self.scale)
         index = self.first_index + self.count
         path = self.session.folder / f"frame_{index:04d}.jpg"
         if not write_jpeg(img, path, self.quality):

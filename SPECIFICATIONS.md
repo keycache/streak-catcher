@@ -78,6 +78,7 @@ class Config:
     # screen capture
     screen_capture_enabled: bool = True                    # False: sessions take no screenshots
     capture_interval_s: float = 0.5
+    capture_scale: float = 0.5                             # 0.5 = logical size (~490 KB/frame); 1.0 = full Retina
     jpeg_quality: float = 0.85
 
     # audio (must match the asr module, provided later)
@@ -92,6 +93,7 @@ class Config:
 
     # caption
     caption_hide_delay_s: float = 2.0
+    fake_transcript: bool = False                          # placeholder words instead of the silent stub
 
     # debugging
     debug: bool = os.environ.get("STREAK_DEBUG") == "1"
@@ -242,7 +244,7 @@ class CapturedFrame:
   ```
 - Mouse position: `NSEvent.mouseLocation()` is thread-safe for reading. `Quartz.CGEventGetLocation(CGEventCreate(None))` can be used instead; it gives top-left origin coordinates, which are converted.
 - After the file is written, call `image_worker.submit(frame)`.
-- Captured images are full resolution (Retina pixels).
+- Captured images are scaled by `capture_scale` (default 0.5, the logical screen size, for example 1728 px wide on a 3456 px Retina panel) with `kCGInterpolationHigh` before encoding. Measured on this Mac: about 490 KB per frame instead of about 1.3 MB at 1.0, and text stays readable. `1.0` keeps full Retina pixels.
 - The caption panel is excluded from the images (§10). The streak overlay is included.
 
 > `CGDisplayCreateImage` is deprecated by Apple in favour of ScreenCaptureKit, but it works on macOS 26.6.2 through PyObjC. If a future macOS removes it, `screen_capture.py` is the only module that needs replacing (same `CapturedFrame` output).
@@ -352,10 +354,12 @@ Decisions to make when Phase 8 starts:
 ### Caption panel (`caption.py`)
 
 - `NSPanel` with style `Borderless | NonactivatingPanel`, level `NSStatusWindowLevel`, `ignoresMouseEvents=True`, transparent background, joins all Spaces.
+- Appearance forced to `NSAppearanceNameVibrantDark`. The HUD material follows the system appearance and renders light gray in Light Mode, which makes white text unreadable.
 - Content: `NSVisualEffectView` (material `HUDWindow`, state active, corner radius 14) containing an `NSTextField` label (not editable, not bezeled, white, system font 20 pt medium, centered, line break `NSLineBreakByTruncatingHead` so the latest words stay visible).
 - Size and position: width `min(900, 0.7 * screen.visibleFrame.width)`, height 56, centered horizontally, 60 pt above the bottom of `visibleFrame` on the session's screen.
-- **Excluded from screenshots:** `panel.setSharingType_(NSWindowSharingNone)`. Verified in Phase 4 by checking that saved frames don't contain it.
-- API (main thread only): `show(screen, text)`, `set_text(text)`, `hide_after(delay_s)`. A new `show` cancels any pending hide.
+- **Excluded from screenshots:** `panel.setSharingType_(NSWindowSharingNone)`. Verified on macOS 26 with `CGDisplayCreateImage`: the panel region is unchanged in live captures and saved frames (mean pixel diff < 1), while the same panel set to `NSWindowSharingReadOnly` shows up clearly (diff around 199).
+- API (main thread only): `show(visible_frame, text)`, `set_text(text)`, `hide_after(delay_s)`, `close()`. A new `show` cancels any pending hide (token checked when the delayed hide fires). `Session.visible_frame` holds the session screen's `visibleFrame()`.
+- `config.fake_transcript = True` swaps in `FakeAudioProcessor`, which emits one placeholder word per 0.5 s of audio and a final sentence at session end, to exercise the caption before real STT.
 
 `controller.on_transcript(text, is_final)` updates the caption. When `is_final` is True, it also appends the text to the session transcript, which becomes `last_transcript` when the session ends.
 

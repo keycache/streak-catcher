@@ -37,7 +37,7 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 | Hotkey | `pynput`. Left Ctrl + Left Shift + Left Option held; other modifiers ignored |
 | Streak | White/cyan glow, short fade (~250 ms), visible in screenshots |
 | Capture | Quartz `CGDisplayCreateImage`, display where the combo started (fixed), every 500 ms whether or not the mouse moves |
-| Images | JPEG saved to a per-session folder, then passed to a per-image background worker. A restart within `session_reuse_window_s` (default 10 s) of the previous stop continues the same folder |
+| Images | JPEG (quality 0.85, half Retina size via `capture_scale = 0.5`, ~500 KB per frame) saved to a per-session folder, then passed to a per-image background worker. A restart within `session_reuse_window_s` (default 10 s) of the previous stop continues the same folder |
 | Audio | PyAudio, 16 kHz, mono, int16 → float32, 1600-sample (100 ms) chunks (the format the `asr` module expects) |
 | Audio save | Session audio is also saved as `audio.wav` |
 | STT | Engine comes from the user's `asr` script (Parakeet TDT 0.6B v3 via NeMo, at `~/Documents/kash/code/test/asr/main.py`). Stub until Phase 8 |
@@ -118,10 +118,10 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 
 **Goal:** show transcribed text in a caption bar.
 
-- [ ] `caption.py`: a `CaptionPanel` (a non-activating, borderless `NSPanel` with an `NSVisualEffectView` in HUD style, rounded corners, and white text) at the bottom center of the screen where the combo started.
-- [ ] Show "Listening…" when a session starts, and update the text whenever the audio processor returns some (sent to the main thread).
-- [ ] Exclude the panel from screenshots (`NSWindowSharingNone`).
-- [ ] Hide the panel 2 s after the session stops. Store the final text as the "last transcript" for the menu item.
+- [x] `caption.py`: a `CaptionPanel` (a non-activating, borderless `NSPanel` with an `NSVisualEffectView` in HUD style, rounded corners, and white text) at the bottom center of the screen where the combo started.
+- [x] Show "Listening…" when a session starts, and update the text whenever the audio processor returns some (sent to the main thread).
+- [x] Exclude the panel from screenshots (`NSWindowSharingNone`).
+- [x] Hide the panel 2 s after the session stops. Store the final text as the "last transcript" for the menu item.
 
 **Done when:** the panel appears and disappears correctly, and fake text (temporarily returned by the stub) shows up live.
 

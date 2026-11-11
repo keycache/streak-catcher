@@ -18,6 +18,9 @@ class Config:
     # screen capture
     screen_capture_enabled: bool = True  # False: no screenshots are taken during sessions
     capture_interval_s: float = 0.5
+    # Frame size relative to native Retina pixels: 0.5 = logical screen size (~490 KB/frame
+    # instead of ~1.3 MB at 1.0, text still readable). 1.0 keeps full resolution.
+    capture_scale: float = 0.5
     jpeg_quality: float = 0.85
 
     # audio (must match the asr module, provided later; importing it would load torch/NeMo)
@@ -36,6 +39,8 @@ class Config:
 
     # caption
     caption_hide_delay_s: float = 2.0
+    # Use a fake audio processor that emits placeholder words (to exercise the caption before real STT).
+    fake_transcript: bool = False
 
     # debugging
     debug: bool = field(default_factory=lambda: os.environ.get("STREAK_DEBUG") == "1")

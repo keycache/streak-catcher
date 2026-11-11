@@ -108,3 +108,15 @@ Non-obvious technical gotchas hit while building Streak Catcher: surprising beha
 **Fix:** each recording creates and terminates its own `PyAudio()` on the `audio-capture` thread. After the first init in a process, this costs about 7 ms.
 
 **Avoid next time:** for long-running apps, don't hold a PortAudio instance across sessions when the user may change audio devices.
+
+---
+
+## 9. HUD `NSVisualEffectView` renders light gray in Light Mode (Phase 6)
+
+**What:** the caption panel used `NSVisualEffectMaterialHUDWindow` with white text, as specified. All automated checks passed, but a cropped capture showed white text on a light gray background, which was hard to read.
+
+**Why:** visual-effect materials take their tint from the window's effective appearance. The app is an accessory app with no explicit appearance, so in Light Mode the "HUD" material renders light, not the dark translucent look the name suggests.
+
+**Fix:** `panel.setAppearance_(NSAppearance.appearanceNamed_(NSAppearanceNameVibrantDark))`.
+
+**Avoid next time:** for any custom-styled window, actually look at it in the current system appearance (crop a capture). Since the caption is excluded from screenshots, temporarily set `NSWindowSharingReadOnly` to capture it. Functional checks can't catch contrast problems.

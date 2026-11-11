@@ -14,6 +14,7 @@ class Session:
     started_wall: datetime
     display_id: int  # CGDirectDisplayID where the current segment's combo started
     screen_frame: object  # NSRect (Cocoa frame of that screen)
+    visible_frame: object  # NSRect excluding menu bar / Dock (caption placement)
     frame_count: int = 0  # frames saved in the folder so far (across segments)
     segment: int = 1  # 1 for a new folder, 2+ when the folder is reused
     segment_started_at: float = 0.0
@@ -50,6 +51,7 @@ def create_session(captures_dir: Path, previous: Session | None = None, reuse_wi
         previous.ended_at = None
         previous.display_id = display_id
         previous.screen_frame = screen.frame()
+        previous.visible_frame = screen.visibleFrame()
         return previous
 
     wall = datetime.now()
@@ -67,5 +69,6 @@ def create_session(captures_dir: Path, previous: Session | None = None, reuse_wi
         started_wall=wall,
         display_id=display_id,
         screen_frame=screen.frame(),
+        visible_frame=screen.visibleFrame(),
         segment_started_at=now,
     )

@@ -6,7 +6,8 @@ from Foundation import NSObject, NSTimer
 from config import CONFIG
 from log import log, log_exc
 from audio_capture import AudioRecorder
-from processing import AudioProcessingWorker, AudioProcessor, ImageProcessingWorker
+from caption import CaptionPanel
+from processing import AudioProcessingWorker, AudioProcessor, FakeAudioProcessor, ImageProcessingWorker
 from screen_capture import ScreenCapturer
 from session import create_session
 from streak import StreakOverlay
@@ -43,7 +44,9 @@ class SessionController:
         self.image_worker = ImageProcessingWorker()
         self.image_worker.start()
         self.capturer = None
-        self.audio_worker = AudioProcessingWorker(AudioProcessor(), self.on_transcript)
+        processor = FakeAudioProcessor() if config.fake_transcript else AudioProcessor()
+        self.audio_worker = AudioProcessingWorker(processor, self.on_transcript)
+        self.caption = CaptionPanel()
         self.audio_worker.start()
         self.recorder = None
         self.transcript: list[str] = []
@@ -62,6 +65,10 @@ class SessionController:
             self.streak.start()
         except Exception:
             log_exc("session", "streak failed to start")
+        try:
+            self.caption.show(s.visible_frame, "Listening…")
+        except Exception:
+            log_exc("session", "caption failed to show")
         self.transcript = []
         try:
             self.audio_worker.start_session(s)
@@ -102,8 +109,10 @@ class SessionController:
             self.audio_worker.end_session()
         if reason == "quit":
             self.streak.close()
+            self.caption.close()
         else:
             self.streak.stop()
+            self.caption.hide_after(self.cfg.caption_hide_delay_s)
         self.delegate.set_active(False)
         s = self.session
         s.frame_count += frames
@@ -113,8 +122,9 @@ class SessionController:
                        f"{frames} frames ({s.frame_count} in folder), {chunks} audio chunks, folder={s.folder}")
 
     def on_transcript(self, text: str, is_final: bool) -> None:
-        """Text from the audio processor (main thread). Caption display comes in Phase 6."""
+        """Text from the audio processor (main thread)."""
         log("transcr", f"{'final' if is_final else 'partial'}: {text}")
+        self.caption.set_text(text)
         if is_final:
             self.transcript.append(text)
             self.delegate.last_transcript = " ".join(self.transcript)
