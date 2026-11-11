@@ -72,11 +72,11 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 
 **Goal:** reliable start and stop callbacks for the combo.
 
-- [ ] `hotkey.py`: a `pynput.keyboard.Listener` that keeps a set of held left-modifier key codes.
-- [ ] Fire `on_activate` when all three are down and `on_deactivate` when any of them is released. Each fires once per transition (edge-triggered).
-- [ ] Send callbacks to the main thread through `AppHelper.callAfter`.
-- [ ] Watchdog: on the main thread, poll `NSEvent.modifierFlags()` during a session. If Ctrl, Shift, or Option is no longer down, force a stop, in case pynput missed a key release.
-- [ ] Respect the Enable/Disable toggle. Disabling during a session stops it.
+- [x] `hotkey.py`: a `pynput.keyboard.Listener` that keeps a set of held left-modifier key codes.
+- [x] Fire `on_activate` when all three are down and `on_deactivate` when any of them is released. Each fires once per transition (edge-triggered).
+- [x] Send callbacks to the main thread through `AppHelper.callAfter`.
+- [x] Watchdog: on the main thread, poll `NSEvent.modifierFlags()` during a session. If Ctrl, Shift, or Option is no longer down, force a stop, in case pynput missed a key release.
+- [x] Respect the Enable/Disable toggle. Disabling during a session stops it.
 
 **Done when:** logs show exactly one start and one stop per press and release. Right-side modifiers don't trigger a session.
 

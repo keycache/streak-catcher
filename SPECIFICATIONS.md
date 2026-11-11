@@ -131,7 +131,7 @@ class HotkeyListener:
 - The listener never suppresses events (`suppress=False`).
 - When `enabled` is False, the listener still tracks `held` but doesn't fire callbacks.
 
-**Watchdog (main thread):** on every streak timer tick during a session, check `NSEvent.modifierFlags()`. If any of `NSEventModifierFlagControl` (1<<18), `NSEventModifierFlagShift` (1<<17), or `NSEventModifierFlagOption` (1<<19) is missing, call `controller.stop(reason="watchdog")` and clear `held` in the listener. This recovers from releases that were missed (for example, during Secure Input).
+**Watchdog (main thread):** during a session, check `NSEvent.modifierFlags()` on every tick of a 50 ms `NSTimer` owned by `SessionController` (independent of the streak timer). If any of `NSEventModifierFlagControl` (1<<18), `NSEventModifierFlagShift` (1<<17), or `NSEventModifierFlagOption` (1<<19) is missing, call `controller.stop(reason="watchdog")` and clear `held` in the listener. This recovers from releases that were missed (for example, during Secure Input).
 
 ## 6. Session lifecycle (`controller.py`, `session.py`)
 

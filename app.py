@@ -16,6 +16,8 @@ from PyObjCTools import AppHelper
 
 import permissions
 from config import CONFIG
+from controller import SessionController
+from hotkey import HotkeyListener
 from log import log, log_exc
 
 ICON_IDLE = "sparkles"
@@ -39,7 +41,32 @@ class AppDelegate(NSObject):
     def applicationDidFinishLaunching_(self, _notification):
         self._build_status_item()
         permissions.report()
+
+        self.hotkey = HotkeyListener(CONFIG.combo_vks, self._on_activate, self._on_deactivate)
+        self.controller = SessionController(self, self.hotkey)
+        self.on_hotkey_toggled = self._on_hotkey_toggled
+        self.shutdown_hooks += [lambda: self.controller.stop("quit"), self.hotkey.stop]
+        self.hotkey.start()
+
         log("app", f"ready (captures: {CONFIG.captures_dir})")
+
+    def _on_activate(self):
+        try:
+            self.controller.start()
+        except Exception:
+            log_exc("app", "session start failed")
+
+    def _on_deactivate(self):
+        try:
+            self.controller.stop("released")
+        except Exception:
+            log_exc("app", "session stop failed")
+
+    def _on_hotkey_toggled(self, enabled: bool):
+        self.hotkey.enabled = enabled
+        if not enabled:
+            self.hotkey.active = False
+            self.controller.stop("disabled")
 
     def applicationWillTerminate_(self, _notification):
         self.shutdown()

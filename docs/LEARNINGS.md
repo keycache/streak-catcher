@@ -48,3 +48,15 @@ Non-obvious technical gotchas hit while building Streak Catcher: surprising beha
 **Fix:** use a Python `subprocess` harness with `communicate(timeout=...)` for time-limited runs, and call `uv` with `~/.local/bin` on `PATH` when needed.
 
 **Avoid next time:** write check scripts in Python under `.tmp/scripts/` and run them with `uv run`, rather than relying on GNU shell tools.
+
+---
+
+## 4. Code after `AppHelper.runEventLoop()` never runs (Phase 2)
+
+**What:** a scripted check stopped the app with `AppHelper.stopEventLoop()` and then printed a pass/fail summary after `runEventLoop()` returned. The summary never appeared, and the process exited with code 0 even when it should have reported failures.
+
+**Why:** when `NSApp` is running, `stopEventLoop()` ends in `NSApp.terminate_()`, and `terminate_` calls `exit()` right after `applicationWillTerminate_`. Control never returns to the Python code after `runEventLoop()`, so `finally` blocks and trailing statements are skipped.
+
+**Fix:** all app cleanup lives in `AppDelegate.shutdown()`, called from `applicationWillTerminate_` (the `finally` in `app.run()` only covers paths that do return). Check scripts report results from a hook appended to `delegate.shutdown_hooks` and exit with `os._exit(code)`.
+
+**Avoid next time:** treat `applicationWillTerminate_` as the *only* reliable place for shutdown work in a Cocoa app, and never put assertions or summaries after `runEventLoop()`.
