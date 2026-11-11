@@ -60,3 +60,27 @@ Non-obvious technical gotchas hit while building Streak Catcher: surprising beha
 **Fix:** all app cleanup lives in `AppDelegate.shutdown()`, called from `applicationWillTerminate_` (the `finally` in `app.run()` only covers paths that do return). Check scripts report results from a hook appended to `delegate.shutdown_hooks` and exit with `os._exit(code)`.
 
 **Avoid next time:** treat `applicationWillTerminate_` as the *only* reliable place for shutdown work in a Cocoa app, and never put assertions or summaries after `runEventLoop()`.
+
+---
+
+## 5. Two modules defining the same `NSObject` subclass name crash on import (Phase 3)
+
+**What:** after adding `streak.py`, the app failed to start with `objc.error: _TimerTarget is overriding existing Objective-C class`.
+
+**Why:** `controller.py` and `streak.py` each defined a private helper `class _TimerTarget(NSObject)`. Python treats them as separate classes, but PyObjC registers every `NSObject` subclass in the **single, process-wide Objective-C class namespace**, so the second definition clashes. The leading underscore doesn't make it module-private.
+
+**Fix:** gave each a unique name (`WatchdogTimerTarget`, `StreakTimerTarget`).
+
+**Avoid next time:** give every `NSObject` / `NSView` subclass a project-unique name, and run the earlier phase checks (`.tmp/scripts/phase*_check.py`) after adding a module, since that is what caught it.
+
+---
+
+## 6. `CGDisplayCreateImage` pixel buffer is larger than `height × bytesPerRow` (Phase 3)
+
+**What:** reading a screenshot into numpy with `reshape(h, bytesPerRow)` failed: `cannot reshape array of size 30883840 into shape (2234,13824)`.
+
+**Why:** the buffer returned by `CGDataProviderCopyData` has extra trailing bytes (1 KB here), and each row may also be padded past `width × 4`.
+
+**Fix:** slice before reshaping: `buf[: h * bpr].reshape(h, bpr)[:, : w * 4].reshape(h, w, 4)`. Pixels are BGRA.
+
+**Avoid next time:** never assume a CoreGraphics buffer is exactly `w × h × 4`; always use `CGImageGetBytesPerRow` and slice.

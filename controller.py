@@ -4,6 +4,7 @@ from AppKit import NSEvent
 from Foundation import NSObject, NSTimer
 
 from log import log
+from streak import StreakOverlay
 
 FLAG_SHIFT = 1 << 17
 FLAG_CONTROL = 1 << 18
@@ -13,7 +14,7 @@ COMBO_FLAGS = FLAG_SHIFT | FLAG_CONTROL | FLAG_OPTION
 WATCHDOG_INTERVAL_S = 0.05
 
 
-class _TimerTarget(NSObject):
+class WatchdogTimerTarget(NSObject):
     def initWithCallback_(self, callback):
         self = self.init()
         self.callback = callback
@@ -31,8 +32,9 @@ class SessionController:
         self.hotkey = hotkey
         self.active = False
         self.started_at = 0.0
+        self.streak = StreakOverlay()
         self._watchdog = None
-        self._timer_target = _TimerTarget.alloc().initWithCallback_(self._watchdog_tick)
+        self._timer_target = WatchdogTimerTarget.alloc().initWithCallback_(self._watchdog_tick)
 
     def start(self) -> None:
         if self.active:
@@ -40,6 +42,7 @@ class SessionController:
         self.active = True
         self.started_at = time.monotonic()
         log("session", "start")
+        self.streak.start()
         self.delegate.set_active(True)
         self._watchdog = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
             WATCHDOG_INTERVAL_S, self._timer_target, "tick:", None, True
@@ -52,6 +55,10 @@ class SessionController:
         if self._watchdog is not None:
             self._watchdog.invalidate()
             self._watchdog = None
+        if reason == "quit":
+            self.streak.close()
+        else:
+            self.streak.stop()
         self.delegate.set_active(False)
         log("session", f"stop ({reason}) after {time.monotonic() - self.started_at:.2f}s")
 

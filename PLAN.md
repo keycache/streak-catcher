@@ -84,11 +84,11 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 
 **Goal:** a glowing trail that follows the cursor on any screen.
 
-- [ ] `streak.py`: a `Trail` model holding `(x, y, t)` points in global Cocoa coordinates and dropping points older than 250 ms.
-- [ ] One borderless, transparent, click-through `NSWindow` per `NSScreen`, at `NSScreenSaverWindowLevel`, joining all Spaces.
-- [ ] A `StreakView` (NSView) that draws tapered segments in three passes (outer cyan glow, inner cyan, white core) with alpha based on each point's age.
-- [ ] A 120 Hz `NSTimer` samples `NSEvent.mouseLocation()` and redraws.
-- [ ] On stop: stop sampling, let the trail fade out, then close the windows.
+- [x] `streak.py`: a `Trail` model holding `(x, y, t)` points in global Cocoa coordinates and dropping points older than 250 ms.
+- [x] One borderless, transparent, click-through `NSWindow` per `NSScreen`, at `NSScreenSaverWindowLevel`, joining all Spaces.
+- [x] A `StreakView` (NSView) that draws tapered segments in three passes (outer cyan glow, inner cyan, white core) with alpha based on each point's age.
+- [x] A 120 Hz `NSTimer` samples `NSEvent.mouseLocation()` and redraws.
+- [x] On stop: stop sampling, let the trail fade out, then close the windows.
 
 **Done when:** the streak is smooth, fades in ~250 ms, works across displays, and doesn't block clicks.
 
