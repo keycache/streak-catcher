@@ -5,7 +5,8 @@ from Foundation import NSObject, NSTimer
 
 from config import CONFIG
 from log import log, log_exc
-from processing import ImageProcessingWorker
+from audio_capture import AudioRecorder
+from processing import AudioProcessingWorker, AudioProcessor, ImageProcessingWorker
 from screen_capture import ScreenCapturer
 from session import create_session
 from streak import StreakOverlay
@@ -42,6 +43,10 @@ class SessionController:
         self.image_worker = ImageProcessingWorker()
         self.image_worker.start()
         self.capturer = None
+        self.audio_worker = AudioProcessingWorker(AudioProcessor(), self.on_transcript)
+        self.audio_worker.start()
+        self.recorder = None
+        self.transcript: list[str] = []
         self._watchdog = None
         self._timer_target = WatchdogTimerTarget.alloc().initWithCallback_(self._watchdog_tick)
 
@@ -57,6 +62,13 @@ class SessionController:
             self.streak.start()
         except Exception:
             log_exc("session", "streak failed to start")
+        self.transcript = []
+        try:
+            self.audio_worker.start_session(s)
+            self.recorder = AudioRecorder(s, self.audio_worker.submit, self.cfg)
+            self.recorder.start()
+        except Exception:
+            log_exc("session", "audio failed to start")
         try:
             if self.cfg.screen_capture_enabled:
                 self.capturer = ScreenCapturer(self.session, self.image_worker.submit, self.cfg)
@@ -82,6 +94,12 @@ class SessionController:
             self.capturer.stop()
             frames = self.capturer.count
             self.capturer = None
+        chunks = 0
+        if self.recorder is not None:
+            self.recorder.stop()
+            chunks = self.recorder.count
+            self.recorder = None
+            self.audio_worker.end_session()
         if reason == "quit":
             self.streak.close()
         else:
@@ -92,11 +110,19 @@ class SessionController:
         s.ended_at = time.monotonic()
         self.last_session, self.session = s, None
         log("session", f"stop {s.id} ({reason}): segment {s.segment} {s.ended_at - s.segment_started_at:.2f}s, "
-                       f"{frames} frames ({s.frame_count} in folder), folder={s.folder}")
+                       f"{frames} frames ({s.frame_count} in folder), {chunks} audio chunks, folder={s.folder}")
+
+    def on_transcript(self, text: str, is_final: bool) -> None:
+        """Text from the audio processor (main thread). Caption display comes in Phase 6."""
+        log("transcr", f"{'final' if is_final else 'partial'}: {text}")
+        if is_final:
+            self.transcript.append(text)
+            self.delegate.last_transcript = " ".join(self.transcript)
 
     def shutdown(self) -> None:
         self.stop("quit")
         self.image_worker.stop()
+        self.audio_worker.stop()
 
     def _watchdog_tick(self) -> None:
         flags = NSEvent.modifierFlags()

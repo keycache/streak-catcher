@@ -40,7 +40,7 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 | Images | JPEG saved to a per-session folder, then passed to a per-image background worker. A restart within `session_reuse_window_s` (default 10 s) of the previous stop continues the same folder |
 | Audio | PyAudio, 16 kHz, mono, int16 → float32, 1600-sample (100 ms) chunks (the format the `asr` module expects) |
 | Audio save | Session audio is also saved as `audio.wav` |
-| STT | Engine comes from the `asr` module (Parakeet via NeMo), **to be provided later** by the user. Stub until then |
+| STT | Engine comes from the user's `asr` script (Parakeet TDT 0.6B v3 via NeMo, at `~/Documents/kash/code/test/asr/main.py`). Stub until Phase 8 |
 | Transcript UI | Floating caption panel at the bottom of the screen |
 | Tests | Minimal. Only check that the basic core workflow works (see Working rules) |
 
@@ -107,10 +107,10 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 
 **Goal:** the mic is live only during a session. Chunks are streamed to a stub processor and saved to WAV.
 
-- [ ] `audio_capture.py`: an `AudioRecorder` thread that opens a PyAudio stream (paInt16, 1 channel, 16 kHz, 1600 frames) when the session starts and closes it on stop.
-- [ ] Convert each chunk to float32 (`np.frombuffer(data, np.int16).astype(np.float32) / 32768.0`, see the Specification, §9) and send it to the `AudioProcessingWorker` queue.
-- [ ] Write the raw int16 data to `audio.wav` using the `wave` module. When the session folder is reused (restart within `session_reuse_window_s`), write `audio_2.wav`, `audio_3.wav`, … per segment so nothing is overwritten.
-- [ ] `processing.py`: an `AudioProcessor` stub with `start_session()`, `process_chunk(chunk) -> str | None`, and `end_session() -> str | None`. All of them return `None` for now.
+- [x] `audio_capture.py`: an `AudioRecorder` thread that opens a PyAudio stream (paInt16, 1 channel, 16 kHz, 1600 frames) when the session starts and closes it on stop.
+- [x] Convert each chunk to float32 (`np.frombuffer(data, np.int16).astype(np.float32) / 32768.0`, see the Specification, §9) and send it to the `AudioProcessingWorker` queue.
+- [x] Write the raw int16 data to `audio.wav` using the `wave` module. When the session folder is reused (restart within `session_reuse_window_s`), write `audio_2.wav`, `audio_3.wav`, … per segment so nothing is overwritten.
+- [x] `processing.py`: an `AudioProcessor` stub with `start_session()`, `process_chunk(chunk) -> str | None`, and `end_session() -> str | None`. All of them return `None` for now.
 
 **Done when:** a 3 s session produces about 30 chunks and a playable `audio.wav` of about 3 s. The mic indicator turns off after release.
 
@@ -138,5 +138,6 @@ Technical details are in [SPECIFICATIONS.md](./SPECIFICATIONS.md).
 
 ## Phase 8 (future): Real transcription and image analysis
 
-- [ ] *(Blocked until the user provides the `asr` module.)* Replace the `AudioProcessor` stub with a wrapper around `asr` (`load_model`, `transcribe`) that reuses its VAD and partial-transcript logic. Load the model lazily at app start on a background thread.
+- [ ] Replace the `AudioProcessor` stub with the `asr` logic (`load_model`, `transcribe`, plus the VAD, pre-roll, and partial-transcript loop from `listen()`). Reference script: `/Users/akashpatki/Documents/kash/code/test/asr/main.py` (own uv venv with torch and NeMo). See the Specification, §10, for the API, constants, and open decisions (environment, calibration, model load).
+- [ ] Load the model lazily at app start on a background thread.
 - [ ] Implement real logic in `process_image`.

@@ -24,6 +24,9 @@ class Config:
     sample_rate: int = 16000
     channels: int = 1
     chunk_size: int = 1600  # 100 ms
+    # Input device: None = system default, otherwise a case-insensitive substring of the
+    # device name (e.g. "MacBook Pro Microphone"). Device names are logged at session start.
+    audio_input_device: str | None = None
 
     # output
     captures_dir: Path = Path(__file__).parent / "captures"

@@ -84,3 +84,27 @@ Non-obvious technical gotchas hit while building Streak Catcher: surprising beha
 **Fix:** slice before reshaping: `buf[: h * bpr].reshape(h, bpr)[:, : w * 4].reshape(h, w, 4)`. Pixels are BGRA.
 
 **Avoid next time:** never assume a CoreGraphics buffer is exactly `w × h × 4`; always use `CGImageGetBytesPerRow` and slice.
+
+---
+
+## 7. Bluetooth headset mic delivers only ~60% of the expected audio (Phase 5)
+
+**What:** a 3 s session produced 18 audio chunks (1.8 s of WAV) instead of ~30. Chunks arrived every ~170 ms on average instead of every 100 ms, from the very first chunk, so it wasn't startup latency.
+
+**Why:** the system default input was a pair of Bluetooth earbuds (`soundcore R50i VI`). A per-device probe (`.tmp/scripts/mic_rate_probe.py`) showed that device delivering 0.61–0.62× of its nominal 16 kHz, even at its own reported default rate. Every other input (built-in mic, virtual devices) ran at 0.98–1.00×. So it's the headset mic path, not the recorder. The user's `asr/main.py` gets the same short audio from that device.
+
+**Fix:** the recorder logs the device name for each recording. `config.audio_input_device` selects a mic by name substring. After 1 s of audio, the recorder compares the audio received against wall time and warns below 0.9×.
+
+**Avoid next time:** when audio counts are off, first log *which device* is recording and measure samples per second per device with a bare PyAudio loop, before suspecting the pipeline. Don't assume the default input is the built-in mic.
+
+---
+
+## 8. PortAudio caches the device list at `PyAudio()` init (Phase 5)
+
+**What:** with one `PyAudio()` created at app start (the original spec), a headset connected or switched to after launch wouldn't be visible or used. The "default input" would stay whatever it was at launch.
+
+**Why:** PortAudio enumerates devices and the default device once, in `Pa_Initialize` (`pyaudio.PyAudio()`), and never refreshes them.
+
+**Fix:** each recording creates and terminates its own `PyAudio()` on the `audio-capture` thread. After the first init in a process, this costs about 7 ms.
+
+**Avoid next time:** for long-running apps, don't hold a PortAudio instance across sessions when the user may change audio devices.

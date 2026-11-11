@@ -25,7 +25,7 @@ Companion to [PLAN.md](./PLAN.md). This document describes how each part is buil
 | Python | 3.14 (root uv venv at `./.venv`) |
 | Run | `uv run main.py` (from the repo root) |
 | Dependencies (root `pyproject.toml`) | `pyaudio`, `pynput` (1.8.x), `pyobjc-framework-Cocoa`, `pyobjc-framework-Quartz` (13.x), `numpy` |
-| Not imported at startup | `torch`, `nemo`. These come with the `asr` module, which will be provided later and is only loaded when real STT is added (Phase 8) |
+| Not imported at startup | `torch`, `nemo`. These come with the `asr` module (see §10, Phase 8 integration) and are only loaded when real STT is added |
 
 Dependencies are added with `uv add`. If the `asr` module later brings torch and NeMo, declare them in `pyproject.toml` too, so a `uv sync` doesn't remove them.
 
@@ -84,6 +84,7 @@ class Config:
     sample_rate: int = 16000
     channels: int = 1
     chunk_size: int = 1600                                 # 100 ms
+    audio_input_device: str | None = None                  # None = system default; else substring of device name
 
     # output
     captures_dir: Path = Path(__file__).parent / "captures"
@@ -271,7 +272,9 @@ class AudioChunk:
 
 **`AudioRecorder(threading.Thread)`:**
 
-- A single `pyaudio.PyAudio()` instance is created at app start and terminated when the app quits. Each session opens and closes its own stream, so the **mic is only active during a session**.
+- Each recording (session segment) creates its own `pyaudio.PyAudio()` on the `audio-capture` thread, opens one stream, and terminates both when it stops, so the **mic is only active during a session**. A long-lived instance would not see input devices connected after app start, because PortAudio caches the device list at init (re-init costs about 7 ms).
+- Device: `audio_input_device` (case-insensitive substring of the device name) or the system default input. The chosen device name is logged at the start of each recording. All inputs are listed in debug mode.
+- Real-time check: after 10 chunks, compare the audio duration received against wall time. Below 0.9x, log a warning naming the device (seen with Bluetooth headset mics at about 0.6x).
 - Loop until `stop_event` is set: read, write the raw bytes to `wave` (`audio.wav`, 1 ch, sample width 2, 16 kHz), convert to float, then `audio_worker.submit(chunk)`.
 - Stopping takes at most about 100 ms (one blocking read).
 - `finally`: `stop_stream()`, `close()`, `wav.close()`.
@@ -303,7 +306,30 @@ class AudioProcessor:
 
 `AudioProcessingWorker`: a daemon thread with `queue.Queue(maxsize=100)` (10 s of audio). It handles three kinds of messages: `("start", session)`, `("chunk", AudioChunk)`, and `("end", None)`. Any non-`None` text is sent to the main thread with `callAfter(controller.on_transcript, text, is_final)`.
 
-**Phase 8 integration** (not built yet; the `asr` module will be provided later and the details below are what it's expected to expose): `AudioProcessor` lazily imports `asr.main` and calls `load_model(MODELS["tdt"])` on a background thread at app start. It reproduces the logic from `listen()` (noise calibration, RMS VAD, pre-roll, `PARTIAL_EVERY`, `SILENCE_CHUNKS`, `MAX_UTTERANCE_CHUNKS`) on the incoming chunks, calling `transcribe(model, np.concatenate(utterance))`. The chunk format above is already what those functions expect.
+**Phase 8 integration** (not built yet). The `asr` module was provided by the user as a reference script:
+
+| Item | Value |
+|---|---|
+| Location | `/Users/akashpatki/Documents/kash/code/test/asr/main.py`, run there as `uv run asr/main.py` |
+| Environment | Its own uv venv at `/Users/akashpatki/Documents/kash/code/test/.venv` (`torch` 2.15.0, `nemo_toolkit` 3.0.0, `omegaconf` 2.3.0). This repo's venv has none of these |
+| Models | `MODELS = {"tdt": "nvidia/parakeet-tdt-0.6b-v3", "ctc": "nvidia/parakeet-ctc-1.1b"}`, default `tdt` (multilingual, punctuated) |
+| Device | `cuda`, then `mps`, then `cpu` |
+| API used | `load_model(name)` (from_pretrained, `.to(DEVICE)`, `.eval()`, switches greedy to `greedy_batch`); `transcribe(model, float32_16k_mono) -> str`; `to_float(bytes)`; `rms(chunk)` |
+| Audio contract | `SAMPLE_RATE = 16000`, `CHUNK_SIZE = 1600`, `to_float` = int16 / 32768. **Matches** `config.py` and `AudioChunk.samples` |
+| VAD constants | `MIN_SPEECH_RMS = 0.01`, `NOISE_MULTIPLIER = 3.0`, `CALIBRATION_CHUNKS = 10`, `PREROLL_CHUNKS = 3`, `SILENCE_CHUNKS = 8`, `PARTIAL_EVERY = 5`, `MAX_UTTERANCE_CHUNKS = 150` |
+
+`listen()` owns its own PyAudio stream, so it can't be called directly. `AudioProcessor` re-implements its loop over incoming `AudioChunk`s:
+
+- `start_session`: reset pre-roll, utterance, and counters.
+- `process_chunk`: VAD with the speech threshold, pre-roll of 3 chunks. Every 5 speech chunks, return a partial transcript (`is_final=False`). After 8 silent chunks or 150 chunks, return the final text for the utterance.
+- `end_session`: transcribe whatever is buffered and return it as final, since push-to-talk sessions usually end mid-utterance.
+
+Decisions to make when Phase 8 starts:
+
+- **Environment:** either add `torch` + `nemo_toolkit[asr]` to this repo's `pyproject.toml` (several GB), or run `asr` as a separate process from the `test` venv and stream chunks to it over a pipe or socket. The second option keeps this app light and starts fast.
+- **Calibration:** `listen()` measures 1 s of silence at startup. In a push-to-talk session the user usually speaks immediately, so calibrate once at app start (or from the idle mic between sessions), or use the fixed `MIN_SPEECH_RMS` floor.
+- **Model load:** load lazily on a background thread at app start (it takes seconds), and show "Loading model…" in the caption until it's ready.
+- **Latency:** `transcribe` runs on the `audio-worker` thread. If it's slower than real time, the bounded queue drops the oldest chunks (logged).
 
 ## 11. Menu bar and caption UI
 
