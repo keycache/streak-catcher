@@ -218,3 +218,45 @@ Non-obvious technical gotchas hit while building Streak Catcher: surprising beha
 **Fix:** draw a wider contrasting halo (white, `annotation_halo_rgba`) under every box and badge, then the colored stroke on top.
 
 **Avoid next time:** test overlays and annotations on several background colors, including ones close to the annotation's own color.
+
+---
+
+## 18. Copilot models: the configured default didn't exist, and most accept only one image (Phase 12)
+
+**What:** the first real call failed with `Model "gpt-5.4" is not available`. `list_models()` showed that nearly every model supports vision but with `max_prompt_images = 1`; only Claude Sonnet and Haiku accept 5. A multi-context request (several annotated screenshots) would fail or be silently cut on most models.
+
+**Why:** model availability is per account and changes over time, and per-model vision limits are part of each model's capabilities.
+
+**Fix:** at startup the provider validates `llm_model` against `list_models()` (with a clear error naming the available models) and reads `capabilities.limits.vision.max_prompt_images`. Requests with more images are capped per `truncate_keep`, with a log line. Default model: `claude-sonnet-5.5`.
+
+**Avoid next time:** before hardcoding a model from docs or examples, list what the account actually exposes, and read its limits.
+
+---
+
+## 19. The Copilot SDK is an agent runtime: sessions can run tools by default (Phase 12)
+
+**What:** `create_session` accepts tools, permission handlers, MCP servers, and working directories. Out of the box, a session's model can call built-in tools (shell, file edits) on the user's machine.
+
+**Why:** the SDK drives the same runtime as the Copilot CLI agent. We only need a text answer about screenshots.
+
+**Fix:** every session is created with `available_tools=[]`.
+
+**Avoid next time:** when using an agent SDK as a plain LLM call, disable tools explicitly. Don't rely on the prompt to keep it from acting.
+
+---
+
+## 20. Rendering LLM markdown in AppKit: three silent formatting traps (Phase 12)
+
+**What:** the response showed raw `**bold**` and `` `code` `` in an `NSAlert`. After rendering via Markdown → HTML → `NSAttributedString`, three more problems showed up, found only by rendering the real response offscreen and looking at it:
+1. Bulleted lists merged into the preceding paragraph ("**The trait** - `type Error;` … - `type Output`…").
+2. No spacing after lists and code blocks, so the next heading touched the last bullet.
+3. Gray code backgrounds bled into the bullet gutter and, for wrapped inline code, from the left margin.
+
+**Why:**
+1. Python-Markdown needs a blank line before a list. CommonMark, and every LLM, writes `**Heading**\n- item`.
+2. AppKit's HTML importer ignores `margin` on `<ul>`, `<ol>` and `<pre>`.
+3. List markers (`\t•\t`) inherit the first child's (monospaced) font, and AppKit fills a wrapped span's background from the line fragment's start, which is the margin on indented paragraphs.
+
+**Fix:** `md_render.normalize()` adds the blank line (outside fenced code). Spacer paragraphs go after `</ul>`, `</ol>` and `</pre>`. Backgrounds are removed from markers, and after layout from inline code that wraps inside indented paragraphs. Text colors are replaced with `labelColor` for Dark Mode.
+
+**Avoid next time:** render real LLM output (lists right after bold lines, wrapped inline code, fenced blocks) in both appearances and look at it; offscreen `cacheDisplayInRect` works without screen capture (`.tmp/scripts/render_response_preview.py`).

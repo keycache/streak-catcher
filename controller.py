@@ -12,6 +12,8 @@ from log import log, log_exc
 from audio_capture import AudioRecorder
 from assembly import Assembler
 from caption import CaptionPanel
+import threading
+from llm import make_provider
 from collections import deque
 import gesture_debug
 from gestures import GestureDetector
@@ -93,6 +95,9 @@ class SessionController:
         if self.speech is not None:
             delegate.set_model_status("Loading speech model…")
             self.speech.start()
+        self.last_response = None
+        self.llm = make_provider(self._on_llm_state, config)
+        self.llm.start()
 
     def _on_model_state(self, state: str, detail: str) -> None:
         """Called on the model-loading thread."""
@@ -269,6 +274,52 @@ class SessionController:
             except Exception:
                 log_exc("transcr", "writing transcript.json failed")
 
+    def _on_llm_state(self, state: str, name: str, detail: str) -> None:
+        """Called from the provider's thread."""
+        text = {"starting": f"LLM: starting {name} ({detail})…", "ready": f"LLM: {name} ready ({detail})",
+                "error": f"LLM: {name} unavailable"}[state]
+        AppHelper.callAfter(self.delegate.set_llm_status, text)
+
+    def _send(self, request: dict) -> None:
+        """LLM request on its own thread; the result comes back to on_response on the main thread."""
+        s = self.last_session
+        if self.session is None:
+            self.caption.show(s.visible_frame, "Thinking…")
+
+        def run():
+            t0 = time.monotonic()
+            text, error = "", None
+            try:
+                text = self.llm.respond(request)
+            except Exception as exc:
+                error = str(exc) or type(exc).__name__
+                log_exc("llm", f"request {request['session']} segment {request['segment']} failed")
+            AppHelper.callAfter(self.on_response, request, text, error, time.monotonic() - t0)
+
+        threading.Thread(target=run, name="llm-request", daemon=True).start()
+
+    def on_response(self, request: dict, text: str, error, seconds: float) -> None:
+        """Main thread: LLM reply (or error) for a request. Phase 13 shows it in the response panel."""
+        s = self.last_session if self.last_session and self.last_session.id == request["session"] else None
+        n = request["segment"]
+        record = {"session": request["session"], "segment": n, "provider": self.llm.name, "model": self.llm.model,
+                  "seconds": round(seconds, 2), "text": text, "error": error}
+        self.last_response = record
+        if s is not None:
+            try:
+                (s.folder / ("response.json" if n == 1 else f"response_{n}.json")).write_text(json.dumps(record, indent=1))
+            except Exception:
+                log_exc("llm", "writing response.json failed")
+        if error:
+            log("llm", f"ERROR after {seconds:.1f}s: {error}")
+            shown = f"LLM error: {error}"
+        else:
+            log("llm", f"response ({self.llm.name}/{self.llm.model}, {seconds:.1f}s):\n{text}")
+            shown = text
+        if self.session is None and s is not None and shown:
+            self.caption.show(s.visible_frame, shown.splitlines()[0])
+            self.caption.hide_after(self.cfg.response_caption_s)
+
     def on_request(self, request: dict) -> None:
         """Main thread: an assembled request for one released segment (sent to the LLM in Phase 12)."""
         self.last_request = request
@@ -285,9 +336,12 @@ class SessionController:
             return
         self.delegate.last_transcript = request["transcript_with_markers"]
         log("assembly", f"request ready: {len(request['images'])} image(s): {request['transcript_with_markers']!r}")
+        if self.llm.name != "none":
+            self._send(request)
 
     def shutdown(self) -> None:
         self.stop("quit")
+        self.llm.stop()
         self.image_worker.stop()
         self.audio_worker.stop()
 

@@ -90,6 +90,27 @@ class Config:
     annotation_label_pt: float = 16.0
     no_instructions_caption_s: float = 1.5  # "No instructions heard" caption duration
 
+    # LLM (Phase 12)
+    # "copilot" | "echo" (offline, describes the request) | "none" (don't send). STREAK_LLM_PROVIDER overrides.
+    llm_provider: str = field(default_factory=lambda: os.environ.get("STREAK_LLM_PROVIDER", "copilot"))
+    llm_model: str = "claude-sonnet-5.5" #"gemini-3.8-flash"  # must support vision; most Copilot models accept only 1 image per prompt
+    llm_timeout_s: float = 60.0  # per request
+    llm_start_timeout_s: float = 60.0  # wait for the Copilot client to start (it takes ~15 s at launch)
+    copilot_cli_path: str | None = None  # None = the SDK's own downloaded runtime
+    response_font_pt: float = 13.0  # rendered markdown body size (Show Last Response / response panel)
+    response_view_width_pt: float = 560.0
+    response_view_max_height_pt: float = 520.0  # taller responses scroll
+    response_caption_s: float = 8.0  # until Phase 13's panel: show the response's first line in the caption
+    llm_prompt_template: str = (
+        "I am looking at my screen. I held a hotkey, spoke an instruction, and may have circled or underlined "
+        "things on screen while talking.\n\n"
+        "Attached: {n_images} screenshot(s) of what I was looking at, in chronological order. Numbered boxes "
+        "like [1], [2] mark what I circled or underlined. Gestures: {gestures}.\n\n"
+        "My spoken instruction (transcribed; [n] marks the moment I made gesture n, so words right before "
+        "a marker usually refer to that box):\n\"{transcript}\"\n\n"
+        "Respond to the instruction directly and concisely. Refer to marked items by number when it helps."
+    )
+
     # caption
     caption_hide_delay_s: float = 2.0
     # Use a fake audio processor that emits placeholder words (to exercise the caption before real STT).

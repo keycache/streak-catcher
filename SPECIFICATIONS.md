@@ -484,14 +484,23 @@ class LLMProvider(Protocol):
     def respond(self, request: LLMRequest) -> str: ...   # text with [n] markers + annotated image paths
 ```
 
-- Chosen by `llm_provider`. The first implementation is **`CopilotProvider`** (PyPI `github-copilot-sdk`, Python 3.11+). The SDK runs the **GitHub Copilot CLI** (`copilot`) in server mode and reuses its credentials (`copilot auth login`, or `COPILOT_GITHUB_TOKEN`). `copilot_cli_path` covers a CLI that isn't on PATH.
+- Chosen by `llm_provider` (env `STREAK_LLM_PROVIDER` overrides): `copilot`, `echo` (offline; describes what would be sent), or `none` (requests are only saved). `llm.py`: `make_provider()`, `build_prompt()`, `cap_images()`.
+- **`CopilotProvider`** (PyPI `github-copilot-sdk`, Python 3.11+). The SDK downloads and runs its own runtime unless `copilot_cli_path` (→ `StdioRuntimeConnection(path=…)`) or `COPILOT_CLI_PATH` is set, and reuses the Copilot CLI login. Startup: `CopilotClient.start()` (~15 s cold, ~1–2 s warm), then `list_models()` validates `llm_model` and reads its vision support and `capabilities.limits.vision.max_prompt_images`.
+- **Models (this account):** `gpt-5.4` is not available. All listed models except `auto` support vision, but **most accept only 1 image per prompt**; Claude Sonnet and Haiku accept 5. Default `llm_model = "claude-sonnet-5.5"`. When a request has more images than the model allows, `cap_images` keeps them per `truncate_keep` and logs the drop.
+- **Safety:** sessions are created with `available_tools=[]`. The SDK is an agent runtime, and by default the model could run tools (shell, file edits); we only want text.
 - Images are supported as **file attachments by absolute path**:
   ```python
   client = CopilotClient(); await client.start()              # once, at app launch
   session = await client.create_session(model=cfg.llm_model)  # per request
-  response = await session.send(prompt, attachments=[{"type": "file", "path": "/abs/context_1.jpg"}, ...])
+  event = await session.send_and_wait(prompt, attachments=[{"type": "file", "path": "/abs/context_1.jpg"}, ...],
+                                      timeout=cfg.llm_timeout_s)    # reply text: event.data.content
+  await session.disconnect()
   ```
-- The client lives on a dedicated asyncio thread. Each request uses a new session (no memory across sessions), with timeout `llm_timeout_s`. Errors are shown in the response panel.
+- The client lives on a dedicated `llm-loop` asyncio thread, started at app launch. Each request runs on an `llm-request` thread (`respond()` blocks on the loop's future) and uses a new session (no memory across sessions), with timeout `llm_timeout_s`. Result or error goes to `controller.on_response` on the main thread, is saved as `response.json` / `response_N.json` (`provider`, `model`, `seconds`, `text`, `error`), and becomes `last_response`.
+- **Markdown rendering** (`md_render.py`, shared with Phase 13): `normalize()` inserts the blank line Python-Markdown needs before a list that directly follows text (skipping fenced code). Then `markdown` (fenced_code, sane_lists, tables) → HTML with system-font CSS (`response_font_pt`) → `NSAttributedString` via the AppKit HTML importer (main thread). Post-processing: `labelColor` for all text (light/dark), a `quaternarySystemFillColor` background on monospaced runs but not on list markers, spacer paragraphs after lists and code blocks (the importer ignores their margins), and after layout `drop_wrapped_code_backgrounds()` removes the background from inline code that wraps inside indented list items (AppKit would fill it from the margin).
+- **Show Last Response**: an `NSAlert` whose accessory view is a selectable `NSTextView` in an `NSScrollView` (`response_view_width_pt` wide, sized to content up to `response_view_max_height_pt`, then scrolls), with the provider, model and time as subtitle, and **OK** / **Copy** (copies the raw markdown).
+- UI until Phase 13: a disabled menu line "LLM: starting copilot (model)… / copilot ready (model) / copilot unavailable", the caption shows "Thinking…" and then the response's first line for `response_caption_s`, and a **Show Last Response** menu item shows the full text.
+- Measured: a red/blue test screenshot with box [1] around the red square and the transcript "What color is this [1] square?" got "Red." from claude-sonnet-5.5 in 1.8 s. A 1-image model (gpt-5.6-luna) given 2 images was capped to the last one and answered correctly.
 - The prompt template explains that `[n]` in the text refers to numbered box `n` in the attached images.
 - **Response panel** (`response_panel.py`): dark HUD style like the caption, bottom-center of the session's screen, replacing the caption. Width `min(response_max_width_pt, response_width_fraction × visibleFrame.width)`. Height grows with the text up to `response_max_height_fraction` × visibleFrame height, then an `NSScrollView` scrolls. Markdown is rendered through `NSAttributedString` when `response_markdown` is set. It has **Copy** and **✕** buttons, accepts mouse events but is non-activating (the user's app keeps focus), and is excluded from screenshots (`NSWindowSharingNone`). It is dismissed by ✕, Esc (detected by the existing pynput listener, since the panel never has focus), the next session, or `response_auto_dismiss_s` if set. It shows "Thinking…" while waiting.
 
@@ -520,6 +529,8 @@ class LLMProvider(Protocol):
 | `assembly_status_after_s` / `no_instructions_caption_s` | `0.3` / `1.5` | Caption status timing |
 | `annotation_rgba` / `annotation_halo_rgba` / `annotation_pad_pt` / `annotation_line_pt` / `annotation_halo_pt` / `annotation_label_pt` | magenta / white / `8` / `3` / `2` / `16` | Numbered gesture boxes |
 | `assembly_timeout_s` / `model_wait_timeout_s` | `5.0` / `60.0` | Wait for the final transcript, or for the model to load |
-| `llm_provider` / `llm_model` / `llm_timeout_s` / `copilot_cli_path` | `"copilot"` / `"gpt-5.4"` / `60.0` / `None` | LLM |
+| `llm_provider` / `llm_model` / `llm_timeout_s` / `llm_start_timeout_s` / `copilot_cli_path` | `"copilot"` (env `STREAK_LLM_PROVIDER`) / `"claude-sonnet-5.5"` / `60.0` / `60.0` / `None` | LLM |
+| `llm_prompt_template` / `response_caption_s` | see `config.py` / `8.0` | Prompt (`{transcript}`, `{n_images}`, `{gestures}`); interim caption duration |
+| `response_font_pt` / `response_view_width_pt` / `response_view_max_height_pt` | `13` / `560` / `520` | Rendered markdown response view |
 | `response_max_width_pt` / `response_width_fraction` / `response_max_height_fraction` | `900` / `0.7` / `0.5` | Response panel size |
 | `response_markdown` / `response_auto_dismiss_s` | `True` / `None` | Response rendering and dismissal |
