@@ -24,6 +24,7 @@ class HotkeyListener:
         self.combo_vks = frozenset(combo_vks)
         self.on_activate = on_activate
         self.on_deactivate = on_deactivate
+        self.on_escape = None  # fn() on the main thread when Esc is pressed (never suppressed)
         self.enabled = True
         self.held: set[int] = set()
         self.active = False
@@ -51,6 +52,8 @@ class HotkeyListener:
     def _on_press(self, key) -> None:
         vk = _vk(key)
         log("hotkey", f"press vk={vk} key={key}", debug=True)
+        if key == keyboard.Key.esc and self.on_escape is not None:
+            AppHelper.callAfter(self.on_escape)
         if vk not in self.combo_vks:
             return
         with self._lock:

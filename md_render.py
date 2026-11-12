@@ -18,7 +18,8 @@ from AppKit import (
     NSParagraphStyleAttributeName,
     NSUTF8StringEncoding,
 )
-from Foundation import NSData, NSMakeRange
+from AppKit import NSScrollView, NSTextView
+from Foundation import NSData, NSMakeRange, NSMakeRect
 
 from config import CONFIG
 
@@ -63,7 +64,42 @@ def to_html(md: str, cfg=CONFIG) -> str:
     return f"<html><head><meta charset='utf-8'><style>{css}</style></head><body>{body}</body></html>"
 
 
-def render(md: str, cfg=CONFIG):
+def render_plain(text: str, cfg=CONFIG):
+    """Unformatted text in the system font with the dynamic label color."""
+    from AppKit import NSFont
+    return NSAttributedString.alloc().initWithString_attributes_(
+        text or "", {NSFontAttributeName: NSFont.systemFontOfSize_(cfg.response_font_pt),
+                     NSForegroundColorAttributeName: NSColor.labelColor()})
+
+
+def make_view(text: str, width: float, max_height: float, markdown_on: bool = True, cfg=CONFIG, code_bg=None):
+    """Selectable text view in a scroll view, sized to its content up to max_height. Returns (scroll, content_h)."""
+    tv = NSTextView.alloc().initWithFrame_(NSMakeRect(0, 0, width, 10))
+    tv.setEditable_(False)
+    tv.setSelectable_(True)
+    tv.setDrawsBackground_(False)
+    tv.setTextContainerInset_((2, 4))
+    tv.textStorage().setAttributedString_(render(text, cfg, code_bg) if markdown_on else render_plain(text, cfg))
+    tv.setVerticallyResizable_(True)
+    tv.setHorizontallyResizable_(False)
+    tv.textContainer().setWidthTracksTextView_(True)
+    if markdown_on:
+        drop_wrapped_code_backgrounds(tv)
+    lm, tc = tv.layoutManager(), tv.textContainer()
+    lm.ensureLayoutForTextContainer_(tc)
+    content_h = lm.usedRectForTextContainer_(tc).size.height + 8
+    height = min(max(content_h, 24), max_height)
+    scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(0, 0, width, height))
+    scroll.setHasVerticalScroller_(content_h > max_height)
+    scroll.setAutohidesScrollers_(True)
+    scroll.setDrawsBackground_(False)
+    scroll.setBorderType_(0)
+    tv.setFrame_(NSMakeRect(0, 0, width, max(content_h, height)))
+    scroll.setDocumentView_(tv)
+    return scroll, content_h
+
+
+def render(md: str, cfg=CONFIG, code_bg=None):
     """Attributed string with dynamic (light/dark) text colors and a subtle background behind code."""
     raw = to_html(md, cfg).encode("utf-8")
     data = NSData.dataWithBytes_length_(raw, len(raw))
@@ -81,7 +117,8 @@ def render(md: str, cfg=CONFIG):
     full = NSMakeRange(0, out.length())
     # Imported HTML hard-codes black; use the system label color so Dark Mode works.
     out.addAttribute_value_range_(NSForegroundColorAttributeName, NSColor.labelColor(), full)
-    code_bg = NSColor.quaternarySystemFillColor() if hasattr(NSColor, "quaternarySystemFillColor") else NSColor.quaternaryLabelColor()
+    if code_bg is None:
+        code_bg = NSColor.quaternarySystemFillColor() if hasattr(NSColor, "quaternarySystemFillColor") else NSColor.quaternaryLabelColor()
 
     def mark_code(font, rng, _stop):
         if font is not None and font.fontDescriptor().symbolicTraits() & NSFontDescriptorTraitMonoSpace:

@@ -12,6 +12,7 @@ from log import log, log_exc
 from audio_capture import AudioRecorder
 from assembly import Assembler
 from caption import CaptionPanel
+from response_panel import ResponsePanel
 import threading
 from llm import make_provider
 from collections import deque
@@ -78,6 +79,7 @@ class SessionController:
             processor = CactusProcessor(self.speech, config)
         self.audio_worker = AudioProcessingWorker(processor, self.on_transcript)
         self.caption = CaptionPanel()
+        self.response = ResponsePanel(config)
         self.audio_worker.start()
         self.recorder = None
         self.partial_text: dict[str, str] = {}  # session id -> committed text so far (assembly timeout fallback)
@@ -109,6 +111,7 @@ class SessionController:
         if self.active:
             return
         self.active = True
+        self.response.hide("next session")
         self.session = create_session(self.cfg.captures_dir, self.last_session, self.cfg.session_reuse_window_s)
         s = self.session
         how = f"continuing (segment {s.segment}, from frame {s.frame_count + 1})" if s.segment > 1 else "new"
@@ -173,6 +176,7 @@ class SessionController:
         if reason == "quit":
             self.streak.close()
             self.caption.close()
+            self.response.hide("quit")
         else:
             self.streak.stop()
             self.caption.hide_after(self.cfg.caption_hide_delay_s)
@@ -283,8 +287,9 @@ class SessionController:
     def _send(self, request: dict) -> None:
         """LLM request on its own thread; the result comes back to on_response on the main thread."""
         s = self.last_session
-        if self.session is None:
-            self.caption.show(s.visible_frame, "Thinking…")
+        if self.session is None:  # the response panel replaces the caption
+            self.caption.close()
+            self.response.show_thinking(s.visible_frame, self.llm.model or self.llm.name)
 
         def run():
             t0 = time.monotonic()
@@ -299,7 +304,7 @@ class SessionController:
         threading.Thread(target=run, name="llm-request", daemon=True).start()
 
     def on_response(self, request: dict, text: str, error, seconds: float) -> None:
-        """Main thread: LLM reply (or error) for a request. Phase 13 shows it in the response panel."""
+        """Main thread: LLM reply (or error) for a request, shown in the response panel."""
         s = self.last_session if self.last_session and self.last_session.id == request["session"] else None
         n = request["segment"]
         record = {"session": request["session"], "segment": n, "provider": self.llm.name, "model": self.llm.model,
@@ -312,13 +317,15 @@ class SessionController:
                 log_exc("llm", "writing response.json failed")
         if error:
             log("llm", f"ERROR after {seconds:.1f}s: {error}")
-            shown = f"LLM error: {error}"
         else:
             log("llm", f"response ({self.llm.name}/{self.llm.model}, {seconds:.1f}s):\n{text}")
-            shown = text
-        if self.session is None and s is not None and shown:
-            self.caption.show(s.visible_frame, shown.splitlines()[0])
-            self.caption.hide_after(self.cfg.response_caption_s)
+        if self.session is None and s is not None:  # never cover a session in progress
+            self.response.show_response(s.visible_frame, record)
+
+    def dismiss_response(self) -> None:
+        """Main thread (Esc via the hotkey listener)."""
+        if self.response.is_visible():
+            self.response.hide("Esc")
 
     def on_request(self, request: dict) -> None:
         """Main thread: an assembled request for one released segment (sent to the LLM in Phase 12)."""

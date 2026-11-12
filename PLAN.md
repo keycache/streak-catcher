@@ -226,10 +226,10 @@ ASR engine: **`cactus-compute`** (`cactus.agent.whistle.Whistle`), following the
 
 **Goal:** show the answer.
 
-- [ ] `response_panel.py`: same dark HUD style as the caption, bottom-center of the session's screen, replacing the caption. Width `min(response_max_width_pt, response_width_fraction × screen)`. Grows with the text up to `response_max_height_fraction` of the screen, then scrolls.
-- [ ] Renders markdown with the shared `md_render.render()` (already used by **Show Last Response**: lists, bold, inline and fenced code, headings, light/dark), gated by `response_markdown`. Has a **Copy** button and a **✕** button. Accepts mouse events, but is non-activating so the user's app keeps focus. Excluded from screenshots.
-- [ ] Dismissed by ✕, Esc (through the existing pynput listener, since the panel never takes focus), or the next session. Optional `response_auto_dismiss_s` (`None` = stays).
-- [ ] Shows "Thinking…" while waiting for the LLM, then the response text.
+- [x] `response_panel.py`: same dark HUD style as the caption, bottom-center of the session's screen, replacing the caption. Width `min(response_max_width_pt, response_width_fraction × screen)`. Grows with the text up to `response_max_height_fraction` of the screen, then scrolls.
+- [x] Renders markdown with the shared `md_render.render()` (already used by **Show Last Response**: lists, bold, inline and fenced code, headings, light/dark), gated by `response_markdown`. Has a **Copy** button and a **✕** button. Accepts mouse events, but is non-activating so the user's app keeps focus. Excluded from screenshots.
+- [x] Dismissed by ✕, Esc (through the existing pynput listener, since the panel never takes focus), or the next session. Optional `response_auto_dismiss_s` (`None` = stays).
+- [x] Shows "Thinking…" while waiting for the LLM, then the response text.
 
 **Done when:** responses are readable, long ones fit or scroll, and dismissing works.
 
@@ -249,5 +249,5 @@ All questions are answered. Every tunable value is a `config.py` field; the defa
 | Requests | One per release (segment); hallucinated words dropped by audio loudness; numbered boxes with a contrasting halo | `speech_min_rms` (`0.008`), `speech_rms_margin_s` (`0.05`), `assembly_status_after_s` (`0.3`), `annotation_rgba`, `annotation_halo_rgba`, `annotation_pad_pt` (`8`), `annotation_line_pt` (`3`), `annotation_halo_pt` (`2`), `annotation_label_pt` (`16`), `no_instructions_caption_s` (`1.5`) |
 | Image cap | No cap; keep the most recent when capped | `max_images` (`None`), `truncate_keep` (`"end"`) |
 | Waiting for transcript | Caption shows status; fall back to committed text | `assembly_timeout_s` (`5.0`), `model_wait_timeout_s` (`60.0`) |
-| LLM | Copilot SDK, new **tool-less** session per request; per-model image limit enforced; `echo` and `none` providers for offline use | `llm_provider` (`"copilot"`, env `STREAK_LLM_PROVIDER`), `llm_model` (`"claude-sonnet-5.5"`: `gpt-5.4` isn't available on this account, and most models accept only 1 image), `llm_timeout_s` (`60.0`), `llm_start_timeout_s` (`60.0`), `copilot_cli_path` (`None`), `llm_prompt_template`, `response_caption_s` (`8.0`, until Phase 13) |
-| Response panel | Bottom-center, scrolls, markdown, Copy and ✕, Esc | `response_max_width_pt` (`900`), `response_width_fraction` (`0.7`), `response_max_height_fraction` (`0.5`), `response_markdown` (`True`), `response_auto_dismiss_s` (`None`) |
+| LLM | Copilot SDK, new **tool-less** session per request; per-model image limit enforced; `echo` and `none` providers for offline use | `llm_provider` (`"copilot"`, env `STREAK_LLM_PROVIDER`), `llm_model` (`"claude-sonnet-5.5"`: `gpt-5.4` isn't available on this account, and most models accept only 1 image), `llm_timeout_s` (`60.0`), `llm_start_timeout_s` (`60.0`), `copilot_cli_path` (`None`), `llm_prompt_template` |
+| Response panel | Bottom-center, replaces the caption, scrolls, markdown, Copy and ✕, Esc, hidden by the next session | `response_max_width_pt` (`760`, narrower than the planned 900 for readable line length), `response_width_fraction` (`0.7`), `response_max_height_fraction` (`0.5`), `response_bottom_margin_pt` (`60`), `response_markdown` (`True`), `response_code_bg_rgba` (white 12%), `response_auto_dismiss_s` (`None`) |

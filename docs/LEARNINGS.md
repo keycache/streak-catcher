@@ -260,3 +260,15 @@ Non-obvious technical gotchas hit while building Streak Catcher: surprising beha
 **Fix:** `md_render.normalize()` adds the blank line (outside fenced code). Spacer paragraphs go after `</ul>`, `</ol>` and `</pre>`. Backgrounds are removed from markers, and after layout from inline code that wraps inside indented paragraphs. Text colors are replaced with `labelColor` for Dark Mode.
 
 **Avoid next time:** render real LLM output (lists right after bold lines, wrapped inline code, fenced blocks) in both appearances and look at it; offscreen `cacheDisplayInRect` works without screen capture (`.tmp/scripts/render_response_preview.py`).
+
+---
+
+## 21. Dynamic system fill colors turn near-black inside a vibrant-dark HUD (Phase 13)
+
+**What:** inline code in the response panel showed harsh near-black boxes, while the same rendering in the light/dark **Show Last Response** alert looked subtle.
+
+**Why:** `NSColor.quaternarySystemFillColor` resolves against the view's effective appearance. Under `NSAppearanceNameVibrantDark` on a HUD visual-effect view, it resolves to a dark fill rather than a light tint.
+
+**Fix:** the panel passes an explicit tint (`response_code_bg_rgba`, white at 12%) to `md_render.render()`. The alert keeps the dynamic color.
+
+**Avoid next time:** check dynamic colors in every appearance and material they'll be drawn in. For a fixed-appearance HUD, prefer explicit RGBA.

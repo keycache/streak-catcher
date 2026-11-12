@@ -100,7 +100,14 @@ class Config:
     response_font_pt: float = 13.0  # rendered markdown body size (Show Last Response / response panel)
     response_view_width_pt: float = 560.0
     response_view_max_height_pt: float = 520.0  # taller responses scroll
-    response_caption_s: float = 8.0  # until Phase 13's panel: show the response's first line in the caption
+    # response panel (Phase 13)
+    response_max_width_pt: float = 760.0
+    response_width_fraction: float = 0.7  # of the screen's visible width
+    response_max_height_fraction: float = 0.5  # of the visible height; longer responses scroll
+    response_bottom_margin_pt: float = 60.0  # same spot as the caption
+    response_markdown: bool = True  # False = show the raw text
+    response_code_bg_rgba: tuple = (1.0, 1.0, 1.0, 0.12)  # inline/fenced code tint on the dark HUD panel
+    response_auto_dismiss_s: float | None = None  # None = stays until ✕ / Esc / next session
     llm_prompt_template: str = (
         "I am looking at my screen. I held a hotkey, spoke an instruction, and may have circled or underlined "
         "things on screen while talking.\n\n"

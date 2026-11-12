@@ -4,8 +4,6 @@ from AppKit import (
     NSAlertSecondButtonReturn,
     NSPasteboard,
     NSPasteboardTypeString,
-    NSScrollView,
-    NSTextView,
     NSApp,
     NSApplication,
     NSApplicationActivationPolicyAccessory,
@@ -16,7 +14,7 @@ from AppKit import (
     NSVariableStatusItemLength,
     NSWorkspace,
 )
-from Foundation import NSURL, NSMakeRect, NSObject
+from Foundation import NSURL, NSObject
 from PyObjCTools import AppHelper
 
 import md_render
@@ -51,6 +49,7 @@ class AppDelegate(NSObject):
         self.hotkey = HotkeyListener(CONFIG.combo_vks, self._on_activate, self._on_deactivate)
         self.controller = SessionController(self, self.hotkey)
         self.on_hotkey_toggled = self._on_hotkey_toggled
+        self.hotkey.on_escape = self.controller.dismiss_response
         self.shutdown_hooks += [self.controller.shutdown, self.hotkey.stop]
         self.hotkey.start()
 
@@ -185,29 +184,8 @@ class AppDelegate(NSObject):
 
 
 def response_view(markdown_text: str):
-    """Scrollable, selectable text view with the rendered markdown, sized to its content."""
-    width, max_h = CONFIG.response_view_width_pt, CONFIG.response_view_max_height_pt
-    text_view = NSTextView.alloc().initWithFrame_(NSMakeRect(0, 0, width, 10))
-    text_view.setEditable_(False)
-    text_view.setSelectable_(True)
-    text_view.setDrawsBackground_(False)
-    text_view.setTextContainerInset_((2, 4))
-    text_view.textStorage().setAttributedString_(md_render.render(markdown_text))
-    text_view.setVerticallyResizable_(True)
-    text_view.setHorizontallyResizable_(False)
-    text_view.textContainer().setWidthTracksTextView_(True)
-    md_render.drop_wrapped_code_backgrounds(text_view)
-    lm = text_view.layoutManager()
-    lm.ensureLayoutForTextContainer_(text_view.textContainer())
-    content_h = lm.usedRectForTextContainer_(text_view.textContainer()).size.height + 8
-    height = min(max(content_h, 40), max_h)
-    scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(0, 0, width, height))
-    scroll.setHasVerticalScroller_(content_h > max_h)
-    scroll.setDrawsBackground_(False)
-    scroll.setBorderType_(0)
-    text_view.setFrame_(NSMakeRect(0, 0, width, max(content_h, height)))
-    scroll.setDocumentView_(text_view)
-    return scroll
+    """Scrollable, selectable rendered-markdown view for the Show Last Response alert."""
+    return md_render.make_view(markdown_text, CONFIG.response_view_width_pt, CONFIG.response_view_max_height_pt)[0]
 
 
 def run() -> None:
